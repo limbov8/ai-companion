@@ -1,20 +1,23 @@
 let sessionId = null;
 let recorder = null;
 let playback = null;
+let activeStream = null;
+let busy = false;
 
 const statusEl = document.querySelector("#status");
+const phaseText = document.querySelector("#phaseText");
 const conversationEl = document.querySelector("#conversation");
-const chatForm = document.querySelector("#chatForm");
-const chatInput = document.querySelector("#chatInput");
 const micButton = document.querySelector("#micButton");
+const micIcon = document.querySelector("#micIcon");
 const stopButton = document.querySelector("#stopButton");
-const memoryList = document.querySelector("#memoryList");
 
 function setStatus(text) {
   statusEl.textContent = text;
+  phaseText.textContent = text;
 }
 
 function addTurn(role, text) {
+  if (!text) return;
   const turn = document.createElement("article");
   turn.className = "turn";
   turn.innerHTML = `<strong>${role}</strong><p></p>`;
@@ -24,23 +27,24 @@ function addTurn(role, text) {
 }
 
 async function sendText(text) {
+  busy = true;
+  micButton.disabled = true;
   addTurn("You", text);
   setStatus("Thinking");
-  const response = await fetch("/api/chat", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ session_id: sessionId, text }),
-  });
-  const data = await response.json();
-  sessionId = data.session_id;
-  addTurn("Companion", data.text);
-  if (data.memory_stored) {
-    const item = document.createElement("li");
-    item.textContent = text;
-    memoryList.prepend(item);
+  try {
+    const data = await postJson("/api/chat", { session_id: sessionId, text });
+    sessionId = data.session_id;
+    addTurn("Companion", data.text);
+    setStatus("Speaking");
+    await playTts(data.text);
+    setStatus("Ready");
+  } catch (error) {
+    showError(error);
+  } finally {
+    busy = false;
+    micButton.disabled = false;
+    micIcon.textContent = "Mic";
   }
-  await playTts(data.text);
-  setStatus("Ready");
 }
 
 async function playTts(text) {
@@ -49,6 +53,7 @@ async function playTts(text) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ session_id: sessionId, text }),
   });
+  if (!response.ok) throw new Error(await response.text());
   const blob = await response.blob();
   if (blob.size === 0 || blob.type === "text/plain") return;
   if (playback) playback.pause();
@@ -56,84 +61,92 @@ async function playTts(text) {
   await playback.play().catch(() => {});
 }
 
-chatForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const text = chatInput.value.trim();
-  if (!text) return;
-  chatInput.value = "";
-  await sendText(text);
-});
-
 micButton.addEventListener("click", async () => {
+  if (busy) return;
   if (recorder && recorder.state === "recording") {
     recorder.stop();
-    micButton.textContent = "Mic";
+    micIcon.textContent = "Mic";
     setStatus("Processing voice");
     return;
   }
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  recorder = new MediaRecorder(stream);
-  const chunks = [];
-  recorder.addEventListener("dataavailable", (event) => chunks.push(event.data));
-  recorder.addEventListener("stop", async () => {
-    stream.getTracks().forEach((track) => track.stop());
-    const blob = new Blob(chunks, { type: "audio/webm" });
+
+  try {
+    activeStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    recorder = new MediaRecorder(activeStream);
+    const chunks = [];
+    recorder.addEventListener("dataavailable", (event) => {
+      if (event.data.size > 0) chunks.push(event.data);
+    });
+    recorder.addEventListener("stop", async () => {
+      stopTracks();
+      await handleRecording(chunks);
+    });
+    recorder.start();
+    micIcon.textContent = "Done";
+    setStatus("Listening");
+  } catch (error) {
+    showError(error, "Microphone error");
+  }
+});
+
+async function handleRecording(chunks) {
+  busy = true;
+  micButton.disabled = true;
+  try {
+    if (chunks.length === 0) throw new Error("No audio was captured.");
+    const blob = new Blob(chunks, { type: recorder?.mimeType || "audio/webm" });
     const form = new FormData();
     form.append("audio", blob, "voice.webm");
     if (sessionId) form.append("session_id", sessionId);
+
+    setStatus("Transcribing");
     const response = await fetch("/api/asr", { method: "POST", body: form });
+    if (!response.ok) throw new Error(await response.text());
     const data = await response.json();
-    const text = data.text || "";
-    if (text) await sendText(text);
-    setStatus("Ready");
+    const text = (data.text || "").trim();
+    if (!text || text.startsWith("[asr unavailable")) {
+      throw new Error(text || "I did not catch that. Try speaking a little longer.");
+    }
+    await sendText(text);
+  } catch (error) {
+    showError(error);
+  } finally {
+    busy = false;
+    micButton.disabled = false;
+    micIcon.textContent = "Mic";
+    recorder = null;
+  }
+}
+
+function stopTracks() {
+  if (!activeStream) return;
+  activeStream.getTracks().forEach((track) => track.stop());
+  activeStream = null;
+}
+
+async function postJson(url, body) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
   });
-  recorder.start();
-  micButton.textContent = "Done";
-  setStatus("Listening");
-});
+  if (!response.ok) throw new Error(await response.text());
+  return response.json();
+}
+
+function showError(error, prefix = "Error") {
+  const message = error?.message || String(error);
+  setStatus(`${prefix}: ${message}`);
+  addTurn("System", message);
+}
 
 stopButton.addEventListener("click", async () => {
   if (playback) playback.pause();
   if (recorder && recorder.state === "recording") recorder.stop();
+  stopTracks();
   if (sessionId) await fetch(`/api/barge-in/${sessionId}`, { method: "POST" });
+  busy = false;
+  micButton.disabled = false;
+  micIcon.textContent = "Mic";
   setStatus("Interrupted");
 });
-
-document.querySelectorAll(".tab").forEach((button) => {
-  button.addEventListener("click", () => {
-    document.querySelectorAll(".tab").forEach((tab) => tab.classList.remove("active"));
-    document.querySelectorAll(".panel").forEach((panel) => panel.classList.remove("active"));
-    button.classList.add("active");
-    document.querySelector(`#${button.dataset.tab}Panel`).classList.add("active");
-  });
-});
-
-async function loadRegistry() {
-  const [prompts, tools] = await Promise.all([
-    fetch("/api/prompts").then((response) => response.json()),
-    fetch("/api/tools").then((response) => response.json()),
-  ]);
-  document.querySelector("#promptList").innerHTML = prompts.prompts
-    .map((prompt) => `<li><strong>${prompt.name}</strong><br>${prompt.description}</li>`)
-    .join("");
-  document.querySelector("#toolList").innerHTML = tools.tools
-    .map((tool) => `<li><strong>${tool.name}</strong><br>${tool.description}</li>`)
-    .join("");
-}
-
-document.querySelector("#searchForm").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const query = document.querySelector("#searchInput").value.trim();
-  if (!query) return;
-  setStatus("Searching");
-  const response = await fetch("/api/tools/run", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: "web_search", args: { query } }),
-  });
-  const data = await response.json();
-  addTurn("Tool", JSON.stringify(data.result, null, 2));
-  setStatus("Ready");
-});
-
-loadRegistry();
