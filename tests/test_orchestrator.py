@@ -36,6 +36,13 @@ class FakeChat:
     async def decide_memory(self, text):
         return {"remember": "quiet" in text.lower(), "category": "preference", "summary": text}
 
+    async def decide_web_search(self, text):
+        return {
+            "search": "unknown" in text.lower(),
+            "query": "fresh context query",
+            "reason": "needs current context",
+        }
+
 
 @dataclass
 class FakeWebSearchTool:
@@ -116,6 +123,57 @@ async def test_orchestrator_searches_web_for_current_questions():
     assert "Example market headline" in response.tool_context
     assert "Current web/tool context" in chat.messages[-1][0]["content"]
     assert "Example market headline" in chat.messages[-1][0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_searches_web_for_chinese_stock_questions():
+    embeddings = EmbeddingService("test-embedding", "cpu", SingleGpuGate(), dimensions=32)
+    store = InMemoryVectorStore()
+    tools = ToolRegistry()
+    search = FakeWebSearchTool()
+    tools.register(search)
+    orchestrator = AgentOrchestrator(
+        chat=FakeChat(),
+        embeddings=embeddings,
+        memory_store=store,
+        prompts=PromptRegistry(),
+        tools=tools,
+        memory_config=MemoryConfig(top_k=4, rerank_top_k=2, similarity_floor=-1.0),
+        conversation_config=ConversationConfig(
+            proactive_topic_interval_minutes=45,
+            allow_random_topics=True,
+        ),
+    )
+
+    response = await orchestrator.handle_text("今天股票怎么样？", [], source="voice")
+
+    assert search.calls == ["今天股票怎么样？"]
+    assert "Example market headline" in response.tool_context
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_asks_llm_before_answering_unknown_questions():
+    embeddings = EmbeddingService("test-embedding", "cpu", SingleGpuGate(), dimensions=32)
+    store = InMemoryVectorStore()
+    tools = ToolRegistry()
+    search = FakeWebSearchTool()
+    tools.register(search)
+    orchestrator = AgentOrchestrator(
+        chat=FakeChat(),
+        embeddings=embeddings,
+        memory_store=store,
+        prompts=PromptRegistry(),
+        tools=tools,
+        memory_config=MemoryConfig(top_k=4, rerank_top_k=2, similarity_floor=-1.0),
+        conversation_config=ConversationConfig(
+            proactive_topic_interval_minutes=45,
+            allow_random_topics=True,
+        ),
+    )
+
+    await orchestrator.handle_text("Tell me something unknown outside your knowledge.", [], source="voice")
+
+    assert search.calls == ["fresh context query"]
 
 
 @pytest.mark.asyncio

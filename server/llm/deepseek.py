@@ -27,6 +27,9 @@ class ChatClient(Protocol):
     async def decide_memory(self, text: str) -> dict[str, object]:
         ...
 
+    async def decide_web_search(self, text: str) -> dict[str, object]:
+        ...
+
 
 @dataclass
 class DeepSeekClient:
@@ -164,6 +167,31 @@ class DeepSeekClient:
             }
         except json.JSONDecodeError:
             return self._heuristic_memory(text)
+
+    async def decide_web_search(self, text: str) -> dict[str, object]:
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "Decide whether the assistant must search the web before answering. "
+                    "Return JSON only with keys search:boolean, query:string, reason:string. "
+                    "Search is required for current or time-sensitive facts: stocks, market, "
+                    "news, prices, weather, recent events, release dates, laws, schedules, "
+                    "or anything the model may not know confidently."
+                ),
+            },
+            {"role": "user", "content": text},
+        ]
+        raw = await self.complete(messages, purpose="utility")
+        try:
+            parsed = json.loads(raw)
+            return {
+                "search": bool(parsed.get("search")),
+                "query": str(parsed.get("query") or text).strip(),
+                "reason": str(parsed.get("reason") or "").strip(),
+            }
+        except json.JSONDecodeError:
+            return {"search": False, "query": text, "reason": "tool decision parse failed"}
 
     def _offline_response(self, messages: list[Message], purpose: str) -> str:
         if purpose == "utility":

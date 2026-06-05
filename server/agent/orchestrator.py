@@ -101,12 +101,16 @@ class AgentOrchestrator:
         )
 
     async def maybe_run_context_tool(self, user_text: str) -> dict[str, Any] | None:
+        search_query = user_text
         if not self.should_search_web(user_text):
-            return None
+            decision = await self.chat.decide_web_search(user_text)
+            if not decision.get("search"):
+                return None
+            search_query = str(decision.get("query") or user_text).strip() or user_text
         try:
-            return await self.tools.run("web_search", query=user_text, limit=6)
+            return await self.tools.run("web_search", query=search_query, limit=6)
         except Exception as exc:
-            return {"query": user_text, "error": str(exc), "results": []}
+            return {"query": search_query, "error": str(exc), "results": []}
 
     @staticmethod
     def should_search_web(user_text: str) -> bool:
@@ -133,6 +137,25 @@ class AgentOrchestrator:
             "weather",
             "forecast",
             "earnings",
+            "股票",
+            "股市",
+            "大盘",
+            "行情",
+            "涨跌",
+            "美股",
+            "a股",
+            "港股",
+            "财报",
+            "新闻",
+            "最新",
+            "今天",
+            "今日",
+            "现在",
+            "实时",
+            "价格",
+            "天气",
+            "比特币",
+            "加密货币",
         )
         if any(marker in text for marker in current_markers):
             return True

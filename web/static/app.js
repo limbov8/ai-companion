@@ -25,6 +25,7 @@ let bargeInMonitor = null;
 let bargeInTriggered = false;
 let voiceStreamHandlers = {};
 let streamedPlaybackChain = Promise.resolve();
+let streamingResponseActive = false;
 let streamingResponseCancelled = false;
 let streamingResponseReject = null;
 
@@ -174,6 +175,7 @@ async function sendText(text) {
 async function sendTextStreaming(text) {
   busy = true;
   micButton.disabled = true;
+  streamingResponseActive = true;
   streamingResponseCancelled = false;
   addTurn("You", text);
   const companionTurn = addTurn("Companion", "", { allowEmpty: true });
@@ -192,6 +194,7 @@ async function sendTextStreaming(text) {
           assistantText += payload.text || "";
           setTurnText(companionTurn, assistantText);
           setStatus("Speaking as thoughts arrive", "speaking");
+          startBargeInMonitor().catch(() => {});
         },
         assistant_audio: (payload) => {
           if (streamingResponseCancelled) return;
@@ -227,7 +230,9 @@ async function sendTextStreaming(text) {
     showError(error);
   } finally {
     voiceStreamHandlers = {};
+    streamingResponseActive = false;
     streamingResponseReject = null;
+    stopBargeInMonitor();
     busy = false;
     micButton.disabled = false;
     micIcon.textContent = "Mic";
@@ -336,7 +341,9 @@ async function playAudioChunk(payload) {
     URL.revokeObjectURL(playback.src);
     playback.removeAttribute("src");
     playback.load();
-    stopBargeInMonitor();
+    if (!streamingResponseActive || streamingResponseCancelled) {
+      stopBargeInMonitor();
+    }
   }
 }
 
