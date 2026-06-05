@@ -1,0 +1,16 @@
+evals:
+  - name: remembers_preference
+    prompt: memory_decision
+    input: "Remember that I prefer morning workouts and hate meetings before 9."
+    expected:
+      remember: true
+      category: preference
+  - name: avoids_transient_memory
+    prompt: memory_decision
+    input: "The weather is cloudy right now."
+    expected:
+      remember: false
+  - name: uses_memory_gently
+    prompt: life_helper_system
+    input: "What should I do tomorrow morning?"
+    expected_behavior: Mentions morning preference only if retrieved memory contains it.
