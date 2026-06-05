@@ -62,7 +62,10 @@ def build_services() -> dict[str, object]:
             gpu_gate,
             language=config.models.tts_language,
             languages=config.models.tts_languages,
+            speed=config.models.tts_speed,
             speaker=config.models.tts_speaker,
+            ref_audio=config.models.tts_ref_audio,
+            ref_text=config.models.tts_ref_text,
             instruct=config.models.tts_instruct,
         ),
         "orchestrator": AgentOrchestrator(

@@ -22,7 +22,10 @@ class QwenTtsService:
     gpu_gate: SingleGpuGate
     language: str = "English"
     languages: tuple[str, ...] = ()
+    speed: float = 1.0
     speaker: str = "Ryan"
+    ref_audio: str | None = None
+    ref_text: str | None = None
     instruct: str = "Natural, warm, conversational speech."
     _engine: object | None = None
 
@@ -84,17 +87,49 @@ class QwenTtsService:
             )
 
         def synthesize(text: str) -> bytes:
-            wavs, sample_rate = model.generate_custom_voice(
-                text=text,
-                language=self._language_for_text(text),
-                speaker=self.speaker,
-                instruct=self.instruct,
-            )
+            language = self._language_for_text(text)
+            if self._uses_base_voice_clone():
+                wavs, sample_rate = model.generate_voice_clone(
+                    text=text,
+                    language=language,
+                    ref_audio=self.ref_audio,
+                    ref_text=self.ref_text,
+                    non_streaming_mode=True,
+                )
+            else:
+                wavs, sample_rate = model.generate_custom_voice(
+                    text=text,
+                    language=language,
+                    speaker=self.speaker,
+                    instruct=self._speed_instruct(),
+                )
+            wav = self._speed_adjust(wavs[0])
             buffer = io.BytesIO()
-            sf.write(buffer, wavs[0], sample_rate, format="WAV")
+            sf.write(buffer, wav, sample_rate, format="WAV")
             return buffer.getvalue()
 
         return synthesize
+
+    def _uses_base_voice_clone(self) -> bool:
+        return "base" in self.model_id.lower()
+
+    def _speed_instruct(self) -> str:
+        if self.speed <= 1.05:
+            return self.instruct
+        speed_hint = "Speak a little faster while staying natural and clear."
+        if not self.instruct:
+            return speed_hint
+        return f"{self.instruct} {speed_hint}"
+
+    def _speed_adjust(self, wav: object) -> object:
+        if self.speed <= 1.02:
+            return wav
+        try:
+            import librosa
+
+            return librosa.effects.time_stretch(wav, rate=self.speed)
+        except Exception:
+            return wav
 
     def _language_for_text(self, text: str) -> str:
         languages = self.languages or (self.language,)

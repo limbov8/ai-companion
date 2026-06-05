@@ -75,4 +75,6 @@ Run the API:
 uvicorn server.main:app --host 0.0.0.0 --port 8086
 ```
 
-The local GPU models are lazy-loaded service adapters. They can be run one at a time on a single GPU instead of keeping ASR, embedding, and TTS resident at all times. Qwen TTS is configured for English and Chinese; Chinese is selected automatically when the response contains CJK text.
+The local GPU models are lazy-loaded service adapters. They can be run one at a time on a single GPU instead of keeping ASR, embedding, and TTS resident at all times. Qwen TTS is configured for English and Chinese; Chinese is selected automatically when the response contains CJK text. `models.tts.model_id` can use either `Qwen/Qwen3-TTS-12Hz-0.6B-Base` for the smaller voice-clone model or `Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice` for named speakers such as `Ryan`. Use `models.tts.speed` to make the generated voice faster or slower.
+
+The voice UI runs as a continuous conversation after the first Mic click. It listens, detects a pause, transcribes, answers, speaks, and returns to listening until Stop is pressed.

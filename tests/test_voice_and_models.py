@@ -64,3 +64,23 @@ def test_tts_auto_selects_chinese_for_cjk_text():
 
     assert service._language_for_text("hello") == "English"
     assert service._language_for_text("你好") == "Chinese"
+
+
+def test_tts_model_id_selects_base_voice_clone_mode():
+    base = QwenTtsService("Qwen/Qwen3-TTS-12Hz-0.6B-Base", "cpu", SingleGpuGate())
+    custom = QwenTtsService("Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice", "cpu", SingleGpuGate())
+
+    assert base._uses_base_voice_clone()
+    assert not custom._uses_base_voice_clone()
+
+
+def test_tts_fast_voice_adds_instruction_hint():
+    service = QwenTtsService(
+        "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
+        "cpu",
+        SingleGpuGate(),
+        speed=1.18,
+        instruct="Natural.",
+    )
+
+    assert "faster" in service._speed_instruct().lower()

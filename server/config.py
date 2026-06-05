@@ -28,7 +28,10 @@ class ModelConfig:
     lazy_tts: bool
     tts_language: str
     tts_languages: tuple[str, ...]
+    tts_speed: float
     tts_speaker: str
+    tts_ref_audio: str | None
+    tts_ref_text: str | None
     tts_instruct: str
 
 
@@ -86,7 +89,10 @@ def load_config(path: str | Path = "config.yml") -> AppConfig:
             lazy_tts=bool(models["tts"].get("lazy_load", True)),
             tts_language=models["tts"].get("language", "English"),
             tts_languages=tuple(models["tts"].get("languages", [])),
+            tts_speed=float(models["tts"].get("speed", 1.0)),
             tts_speaker=models["tts"].get("speaker", "Ryan"),
+            tts_ref_audio=models["tts"].get("ref_audio"),
+            tts_ref_text=models["tts"].get("ref_text"),
             tts_instruct=models["tts"].get("instruct", ""),
         ),
         database=DatabaseConfig(dsn=os.getenv(db.get("dsn_env", "DATABASE_URL"), db["default_dsn"])),

@@ -28,14 +28,17 @@ models:
     device: cuda
   tts:
     provider: local
-    model_id: Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice
+    model_id: Qwen/Qwen3-TTS-12Hz-0.6B-Base
     device: cuda
     lazy_load: true
     language: English
     languages:
       - English
       - Chinese
+    speed: 1.18
     speaker: Ryan
+    ref_audio: https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen3-TTS-Repo/clone.wav
+    ref_text: Okay. Yeah. I resent you. I love you. I respect you. But you know what? You blew it! And thanks to you.
     instruct: Natural, warm, conversational speech.
 
 memory:

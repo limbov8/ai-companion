@@ -17,6 +17,7 @@ let voiceSocket = null;
 let streamedTranscript = null;
 let streamedTranscriptResolve = null;
 let streamedTranscriptReject = null;
+let conversationActive = false;
 
 const silenceThreshold = 0.018;
 const pauseToSubmitMs = 950;
@@ -122,13 +123,20 @@ async function sendText(text) {
     addMemoryActivity({ memoryStored, memoriesUsed });
     setStatus("Preparing voice", "processing");
     await playTts(data.text);
-    setStatus("Ready", "ready");
+    setStatus(conversationActive ? "Listening again" : "Ready", "ready");
   } catch (error) {
     showError(error);
   } finally {
     busy = false;
     micButton.disabled = false;
     micIcon.textContent = "Mic";
+    if (conversationActive) {
+      setTimeout(() => {
+        if (conversationActive && !busy && (!recorder || recorder.state !== "recording")) {
+          startListening().catch((error) => showError(error, "Microphone error"));
+        }
+      }, 250);
+    }
   }
 }
 
@@ -162,6 +170,7 @@ async function playTts(text) {
   playback = speakerOutput;
   playback.src = URL.createObjectURL(blob);
   playback.currentTime = 0;
+  playback.playbackRate = 1.03;
   setStatus("Speaking", "speaking");
 
   await new Promise((resolve, reject) => {
@@ -193,7 +202,7 @@ async function speakWithBrowserVoice(text) {
   await new Promise((resolve, reject) => {
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = "en-US";
-    utterance.rate = 0.98;
+    utterance.rate = 1.15;
     utterance.pitch = 1.0;
     utterance.onend = resolve;
     utterance.onerror = (event) => reject(new Error(`Browser voice failed: ${event.error}`));
@@ -211,31 +220,39 @@ micButton.addEventListener("click", async () => {
   }
 
   try {
-    activeStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    recorder = new MediaRecorder(activeStream);
-    const chunks = [];
-    await startVoiceStream(recorder.mimeType || "audio/webm").catch(() => {
-      streamedTranscript = null;
-      stopVoiceStream(false);
-    });
-    recorder.addEventListener("dataavailable", (event) => {
-      if (event.data.size > 0) chunks.push(event.data);
-      if (event.data.size > 0) sendVoiceChunk(event.data);
-    });
-    recorder.addEventListener("stop", async () => {
-      stopSilenceMonitor();
-      stopTracks();
-      await handleRecording(chunks);
-    });
-    recorder.start(250);
-    startSilenceMonitor(activeStream);
-    micIcon.textContent = "Listening";
-    micButton.title = "Send now";
-    setStatus("Listening. Pause to send.", "listening");
+    conversationActive = true;
+    await startListening();
   } catch (error) {
     showError(error, "Microphone error");
   }
 });
+
+async function startListening() {
+  if (busy || (recorder && recorder.state === "recording")) {
+    return;
+  }
+  activeStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  recorder = new MediaRecorder(activeStream);
+  const chunks = [];
+  await startVoiceStream(recorder.mimeType || "audio/webm").catch(() => {
+    streamedTranscript = null;
+    stopVoiceStream(false);
+  });
+  recorder.addEventListener("dataavailable", (event) => {
+    if (event.data.size > 0) chunks.push(event.data);
+    if (event.data.size > 0) sendVoiceChunk(event.data);
+  });
+  recorder.addEventListener("stop", async () => {
+    stopSilenceMonitor();
+    stopTracks();
+    await handleRecording(chunks);
+  });
+  recorder.start(250);
+  startSilenceMonitor(activeStream);
+  micIcon.textContent = "Listening";
+  micButton.title = "Send now";
+  setStatus("Listening. Pause to send.", "listening");
+}
 
 async function startVoiceStream(contentType) {
   stopVoiceStream();
@@ -381,6 +398,7 @@ function stopSilenceMonitor() {
 async function handleRecording(chunks) {
   busy = true;
   micButton.disabled = true;
+  let sentToAssistant = false;
   try {
     if (recordingStopReason === "timeout" && !recordingHadSpeech) {
       throw new Error("I did not hear speech. Try again when you are ready.");
@@ -403,6 +421,7 @@ async function handleRecording(chunks) {
     if (!text || text.startsWith("[asr unavailable")) {
       throw new Error(text || "I did not catch that. Try speaking a little longer.");
     }
+    sentToAssistant = true;
     await sendText(text);
   } catch (error) {
     showError(error);
@@ -413,6 +432,13 @@ async function handleRecording(chunks) {
     micButton.title = "Start talking";
     recorder = null;
     stopVoiceStream(false);
+    if (conversationActive && !sentToAssistant && !busy) {
+      setTimeout(() => {
+        if (conversationActive && !busy && (!recorder || recorder.state !== "recording")) {
+          startListening().catch((error) => showError(error, "Microphone error"));
+        }
+      }, 350);
+    }
   }
 }
 
@@ -472,6 +498,7 @@ function showError(error, prefix = "Error") {
 }
 
 stopButton.addEventListener("click", async () => {
+  conversationActive = false;
   ttsAbort?.abort();
   window.speechSynthesis?.cancel();
   if (playback) playback.pause();

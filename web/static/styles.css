@@ -27,8 +27,8 @@ body {
 
 .talk-surface {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
+  grid-template-rows: auto minmax(0, 7fr) minmax(0, 3fr);
   min-height: 100vh;
   background: var(--surface);
 }
@@ -78,13 +78,14 @@ button:focus {
 }
 
 .voice-stage {
-  grid-column: 1 / -1;
+  grid-column: 1;
+  grid-row: 2 / 4;
   display: grid;
   justify-items: center;
   align-content: center;
   gap: 18px;
-  min-height: 38vh;
-  padding: 32px 24px 20px;
+  min-height: 0;
+  padding: 32px 24px;
 }
 
 .voice-button {
@@ -178,11 +179,16 @@ button:focus {
 }
 
 .history-surface {
+  grid-column: 2;
+  grid-row: 2;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
+  border-left: 1px solid var(--line);
 }
 
 .memory-surface {
+  grid-column: 2;
+  grid-row: 3;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   border-left: 1px solid var(--line);
@@ -303,9 +309,14 @@ button:focus {
 @media (max-width: 860px) {
   .talk-surface {
     grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(320px, 48vh) minmax(260px, 42vh) minmax(180px, 28vh);
   }
 
+  .voice-stage,
+  .history-surface,
   .memory-surface {
+    grid-column: 1;
+    grid-row: auto;
     border-left: 0;
   }
 
