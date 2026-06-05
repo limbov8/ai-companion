@@ -51,7 +51,7 @@ run-api:
 	$(PYTHON) -m uvicorn server.main:app --host $(HOST) --port $(PORT)
 
 run-api-local:
-	@powershell -NoProfile -ExecutionPolicy Bypass -Command "$$env:AI_COMPANION_ENABLE_LOCAL_MODELS='1'; $$env:AI_COMPANION_PRELOAD_LOCAL_MODELS='1'; $$env:AI_COMPANION_STRICT_LOCAL_MODELS='1'; $$env:AI_COMPANION_SMOKE_TEST_LOCAL_MODELS='1'; $$env:USE_TF='0'; & '$(PYTHON)' -m uvicorn server.main:app --host '$(HOST)' --port '$(PORT)'"
+	@powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run_api_local.ps1 -Python '$(PYTHON)' -HostName '$(HOST)' -Port $(PORT)
 
 docker-run: init-env check-docker
 	PG_PORT=$(PG_PORT) docker compose up --build
