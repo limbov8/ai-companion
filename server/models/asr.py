@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from dataclasses import dataclass
 
 from server.models.gpu import SingleGpuGate
@@ -26,6 +27,8 @@ class WhisperAsrService:
         return await self.gpu_gate.run(self.model_id, work)
 
     async def _load_pipeline(self) -> object:
+        if os.getenv("AI_COMPANION_ENABLE_LOCAL_MODELS", "0") != "1":
+            return None
         try:
             from transformers import pipeline
         except ImportError:

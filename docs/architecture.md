@@ -13,7 +13,7 @@ This monolith is split by component folders:
 
 ## Single GPU behavior
 
-The `SingleGpuGate` serializes local model work. Heavy adapters are lazy-loaded, so ASR, embedding, and TTS work can be staged instead of trying to run all local models at once. For production use, add model unload hooks after each call or introduce a small worker queue per model.
+The `SingleGpuGate` serializes local model work. Heavy adapters are lazy-loaded, so ASR, embedding, and TTS work can be staged instead of trying to run all local models at once. Set `AI_COMPANION_ENABLE_LOCAL_MODELS=1` when the Hugging Face models are downloaded and ready; otherwise the app uses deterministic local fallbacks for development. For production use, add model unload hooks after each call or introduce a small worker queue per model.
 
 ## RAG flow
 
