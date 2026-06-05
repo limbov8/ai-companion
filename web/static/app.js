@@ -6,6 +6,18 @@ let ttsAbort = null;
 let busy = false;
 let turnCount = 0;
 let memoryEventCount = 0;
+let audioContext = null;
+let silenceMonitor = null;
+let recordingStartedAt = 0;
+let speechStarted = false;
+let lastVoiceAt = 0;
+let recordingHadSpeech = false;
+let recordingStopReason = "manual";
+
+const silenceThreshold = 0.018;
+const pauseToSubmitMs = 950;
+const noSpeechTimeoutMs = 6000;
+const maxRecordingMs = 45000;
 
 const statusEl = document.querySelector("#status");
 const phaseText = document.querySelector("#phaseText");
@@ -188,7 +200,7 @@ async function speakWithBrowserVoice(text) {
 micButton.addEventListener("click", async () => {
   if (busy) return;
   if (recorder && recorder.state === "recording") {
-    recorder.stop();
+    stopRecording("manual");
     micIcon.textContent = "Mic";
     setStatus("Processing voice", "processing");
     return;
@@ -202,21 +214,95 @@ micButton.addEventListener("click", async () => {
       if (event.data.size > 0) chunks.push(event.data);
     });
     recorder.addEventListener("stop", async () => {
+      stopSilenceMonitor();
       stopTracks();
       await handleRecording(chunks);
     });
-    recorder.start();
-    micIcon.textContent = "Done";
-    setStatus("Listening", "listening");
+    recorder.start(250);
+    startSilenceMonitor(activeStream);
+    micIcon.textContent = "Listening";
+    micButton.title = "Send now";
+    setStatus("Listening. Pause to send.", "listening");
   } catch (error) {
     showError(error, "Microphone error");
   }
 });
 
+function stopRecording(_reason = "auto") {
+  if (!recorder || recorder.state !== "recording") {
+    return;
+  }
+  recordingStopReason = _reason;
+  recorder.stop();
+}
+
+function startSilenceMonitor(stream) {
+  stopSilenceMonitor();
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  audioContext = new AudioContextClass();
+  const source = audioContext.createMediaStreamSource(stream);
+  const analyser = audioContext.createAnalyser();
+  analyser.fftSize = 1024;
+  source.connect(analyser);
+
+  const samples = new Float32Array(analyser.fftSize);
+  recordingStartedAt = performance.now();
+  lastVoiceAt = recordingStartedAt;
+  speechStarted = false;
+  recordingHadSpeech = false;
+  recordingStopReason = "manual";
+
+  function tick(now) {
+    analyser.getFloatTimeDomainData(samples);
+    const rms = Math.sqrt(samples.reduce((total, sample) => total + sample * sample, 0) / samples.length);
+    if (rms > silenceThreshold) {
+      speechStarted = true;
+      recordingHadSpeech = true;
+      lastVoiceAt = now;
+      setStatus("Listening", "listening");
+    } else if (speechStarted) {
+      const quietFor = now - lastVoiceAt;
+      setStatus(quietFor > 450 ? "Pause detected" : "Listening", "listening");
+      if (quietFor >= pauseToSubmitMs) {
+        setStatus("Processing voice", "processing");
+        stopRecording("silence");
+        return;
+      }
+    } else if (now - recordingStartedAt >= noSpeechTimeoutMs) {
+      setStatus("No speech detected", "processing");
+      stopRecording("timeout");
+      return;
+    }
+
+    if (now - recordingStartedAt >= maxRecordingMs) {
+      setStatus("Processing voice", "processing");
+      stopRecording("max");
+      return;
+    }
+    silenceMonitor = requestAnimationFrame(tick);
+  }
+  silenceMonitor = requestAnimationFrame(tick);
+}
+
+function stopSilenceMonitor() {
+  if (silenceMonitor) {
+    cancelAnimationFrame(silenceMonitor);
+    silenceMonitor = null;
+  }
+  if (audioContext) {
+    audioContext.close();
+    audioContext = null;
+  }
+  speechStarted = false;
+}
+
 async function handleRecording(chunks) {
   busy = true;
   micButton.disabled = true;
   try {
+    if (recordingStopReason === "timeout" && !recordingHadSpeech) {
+      throw new Error("I did not hear speech. Try again when you are ready.");
+    }
     if (chunks.length === 0) throw new Error("No audio was captured.");
     const blob = new Blob(chunks, { type: recorder?.mimeType || "audio/webm" });
     const form = new FormData();
@@ -238,11 +324,13 @@ async function handleRecording(chunks) {
     busy = false;
     micButton.disabled = false;
     micIcon.textContent = "Mic";
+    micButton.title = "Start talking";
     recorder = null;
   }
 }
 
 function stopTracks() {
+  stopSilenceMonitor();
   if (!activeStream) return;
   activeStream.getTracks().forEach((track) => track.stop());
   activeStream = null;
@@ -272,11 +360,12 @@ stopButton.addEventListener("click", async () => {
   ttsAbort?.abort();
   window.speechSynthesis?.cancel();
   if (playback) playback.pause();
-  if (recorder && recorder.state === "recording") recorder.stop();
+  if (recorder && recorder.state === "recording") stopRecording("barge-in");
   stopTracks();
   if (sessionId) await fetch(`/api/barge-in/${sessionId}`, { method: "POST" });
   busy = false;
   micButton.disabled = false;
   micIcon.textContent = "Mic";
+  micButton.title = "Start talking";
   setStatus("Interrupted", "ready");
 });
