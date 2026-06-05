@@ -9,7 +9,7 @@ __pycache__/
 !.env.example
 logs/
 data/
-models/
+/models/
 node_modules/
 dist/
 build/
