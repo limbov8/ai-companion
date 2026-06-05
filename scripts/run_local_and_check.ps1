@@ -1,7 +1,7 @@
 param(
     [string]$Python = "python",
     [string]$HostName = "127.0.0.1",
-    [int]$Port = 8080,
+    [int]$Port = 8086,
     [int]$TimeoutSeconds = 900
 )
 

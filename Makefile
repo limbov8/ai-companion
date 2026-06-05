@@ -1,6 +1,6 @@
 PYTHON ?= python
 HOST ?= 127.0.0.1
-PORT ?= 8080
+PORT ?= 8086
 PG_PORT ?= 5433
 
 .PHONY: help init-env install install-audio-tools install-local-models check-docker db run run-no-db run-check run-check-no-db run-api run-api-local docker-run test gpu-status stop logs clean

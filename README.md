@@ -21,7 +21,7 @@ Personal AI companion monolith for voice conversation, note taking, memory, retr
 make run
 ```
 
-3. Open `http://localhost:8080`.
+3. Open `http://localhost:8086`.
 
 The `make run` target creates `.env` when missing, starts Postgres with pgvector, installs local model dependencies, and runs the FastAPI/UI server with strict local GPU model preload. Startup fails if Whisper ASR, Qwen embedding, or Qwen TTS cannot load.
 
@@ -70,7 +70,7 @@ pip install -e ".[dev]"
 Run the API:
 
 ```powershell
-uvicorn server.main:app --host 0.0.0.0 --port 8080
+uvicorn server.main:app --host 0.0.0.0 --port 8086
 ```
 
 The local GPU models are lazy-loaded service adapters. They can be run one at a time on a single GPU instead of keeping ASR, embedding, and TTS resident at all times.
