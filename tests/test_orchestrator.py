@@ -28,6 +28,11 @@ class FakeChat:
         self.messages.append(messages)
         return "Good plan. I will keep it quiet and practical."
 
+    async def stream_complete(self, messages, *, purpose="conversation"):
+        await self.complete(messages, purpose=purpose)
+        for chunk in ("Good plan. ", "I will keep it quiet and practical."):
+            yield chunk
+
     async def decide_memory(self, text):
         return {"remember": "quiet" in text.lower(), "category": "preference", "summary": text}
 
@@ -111,3 +116,34 @@ async def test_orchestrator_searches_web_for_current_questions():
     assert "Example market headline" in response.tool_context
     assert "Current web/tool context" in chat.messages[-1][0]["content"]
     assert "Example market headline" in chat.messages[-1][0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_streams_response_and_final_memory_metadata():
+    embeddings = EmbeddingService("test-embedding", "cpu", SingleGpuGate(), dimensions=32)
+    store = InMemoryVectorStore()
+    orchestrator = AgentOrchestrator(
+        chat=FakeChat(),
+        embeddings=embeddings,
+        memory_store=store,
+        prompts=PromptRegistry(),
+        tools=ToolRegistry(),
+        memory_config=MemoryConfig(top_k=4, rerank_top_k=2, similarity_floor=-1.0),
+        conversation_config=ConversationConfig(
+            proactive_topic_interval_minutes=45,
+            allow_random_topics=True,
+        ),
+    )
+
+    events = [
+        event
+        async for event in orchestrator.handle_text_stream(
+            "I like quiet mornings.",
+            [],
+            source="voice",
+        )
+    ]
+
+    assert [event["type"] for event in events] == ["text_delta", "text_delta", "done"]
+    assert events[-1]["text"].startswith("Good plan")
+    assert events[-1]["memory_stored"] is True

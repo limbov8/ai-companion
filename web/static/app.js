@@ -23,6 +23,8 @@ let bargeInStream = null;
 let bargeInAudioContext = null;
 let bargeInMonitor = null;
 let bargeInTriggered = false;
+let voiceStreamHandlers = {};
+let streamedPlaybackChain = Promise.resolve();
 
 const silenceThreshold = 0.018;
 const bargeInThreshold = 0.035;
@@ -51,7 +53,7 @@ function setStatus(text, phase = "ready") {
 }
 
 function addTurn(role, text, meta = {}) {
-  if (!text) return;
+  if (!text && !meta.allowEmpty) return;
   const turn = document.createElement("article");
   turn.className = `turn turn-${role.toLowerCase()}`;
   turn.innerHTML = `<div class="turn-head"><strong></strong><span></span></div><p></p>`;
@@ -69,6 +71,12 @@ function addTurn(role, text, meta = {}) {
   turnCount += 1;
   historyCountEl.textContent = `${turnCount} ${turnCount === 1 ? "turn" : "turns"}`;
   return turn;
+}
+
+function setTurnText(turn, text) {
+  if (!turn) return;
+  turn.querySelector("p").textContent = text;
+  conversationEl.scrollTop = conversationEl.scrollHeight;
 }
 
 function memoryBadges(meta) {
@@ -118,6 +126,10 @@ function addMemoryActivity({ memoryStored = false, memoriesUsed = [] }) {
 }
 
 async function sendText(text) {
+  if (voiceSocket?.readyState === WebSocket.OPEN) {
+    await sendTextStreaming(text);
+    return;
+  }
   busy = true;
   micButton.disabled = true;
   addTurn("You", text);
@@ -145,6 +157,96 @@ async function sendText(text) {
         }
       }, 250);
     }
+  }
+}
+
+async function sendTextStreaming(text) {
+  busy = true;
+  micButton.disabled = true;
+  addTurn("You", text);
+  const companionTurn = addTurn("Companion", "", { allowEmpty: true });
+  let assistantText = "";
+  let finalMeta = { memoryStored: false, memoriesUsed: [] };
+  streamedPlaybackChain = Promise.resolve();
+  setStatus("Thinking", "processing");
+
+  try {
+    await new Promise((resolve, reject) => {
+      voiceStreamHandlers = {
+        assistant_start: () => setStatus("Thinking", "processing"),
+        assistant_delta: (payload) => {
+          assistantText += payload.text || "";
+          setTurnText(companionTurn, assistantText);
+          setStatus("Speaking as thoughts arrive", "speaking");
+        },
+        assistant_audio: (payload) => {
+          streamedPlaybackChain = streamedPlaybackChain.then(() => playAudioChunk(payload));
+        },
+        tts_error: (payload) => {
+          addTurn("System", `Local TTS chunk failed. ${payload.message || ""}`);
+        },
+        assistant_done: (payload) => {
+          finalMeta = {
+            memoryStored: Boolean(payload.memory_stored),
+            memoriesUsed: Array.isArray(payload.memories_used) ? payload.memories_used : [],
+          };
+          if (payload.text) {
+            assistantText = payload.text;
+            setTurnText(companionTurn, assistantText);
+          }
+          resolve();
+        },
+        error: (payload) => reject(new Error(payload.message || "Voice stream error")),
+      };
+      voiceSocket.send(JSON.stringify({ type: "text", text }));
+    });
+    await streamedPlaybackChain;
+    const badges = memoryBadges(finalMeta);
+    if (badges.children.length) companionTurn.append(badges);
+    addMemoryActivity(finalMeta);
+    setStatus(conversationActive ? "Listening again" : "Ready", "ready");
+  } catch (error) {
+    showError(error);
+  } finally {
+    voiceStreamHandlers = {};
+    busy = false;
+    micButton.disabled = false;
+    micIcon.textContent = "Mic";
+    if (conversationActive) {
+      setTimeout(() => {
+        if (conversationActive && !busy && (!recorder || recorder.state !== "recording")) {
+          startListening().catch((error) => showError(error, "Microphone error"));
+        }
+      }, 250);
+    }
+  }
+}
+
+async function playAudioChunk(payload) {
+  const audio = payload.audio || "";
+  if (!audio) return;
+  const blob = base64ToBlob(audio, payload.mime_type || "audio/wav");
+  if (playback) {
+    playback.pause();
+    URL.revokeObjectURL(playback.src);
+  }
+  playback = speakerOutput;
+  playback.src = URL.createObjectURL(blob);
+  playback.currentTime = 0;
+  playback.playbackRate = 1.03;
+  setStatus("Speaking", "speaking");
+  await startBargeInMonitor().catch(() => {});
+  try {
+    await new Promise((resolve, reject) => {
+      playback.onended = resolve;
+      playback.onerror = () => reject(new Error("The browser could not play a streamed voice chunk."));
+      playback.play().catch((error) => reject(new Error(`Audio playback failed: ${error.message}`)));
+    });
+  } finally {
+    URL.revokeObjectURL(playback.src);
+    playback.removeAttribute("src");
+    playback.load();
+    stopBargeInMonitor();
   }
 }
 
@@ -367,13 +469,16 @@ async function startVoiceStream(contentType) {
     const payload = JSON.parse(event.data);
     if (payload.type === "transcript") {
       streamedTranscriptResolve?.(payload.text || "");
-      stopVoiceStream(false);
     } else if (payload.type === "error") {
+      voiceStreamHandlers.error?.(payload);
       streamedTranscriptReject?.(new Error(payload.message || "Voice stream error"));
       stopVoiceStream(false);
+    } else if (voiceStreamHandlers[payload.type]) {
+      voiceStreamHandlers[payload.type](payload);
     }
   });
   voiceSocket.addEventListener("error", () => {
+    voiceStreamHandlers.error?.({ message: "Voice stream failed." });
     streamedTranscriptReject?.(new Error("Voice stream failed."));
     stopVoiceStream(false);
   });
@@ -423,6 +528,15 @@ function blobToBase64(blob) {
     reader.onerror = () => reject(new Error("Could not read audio chunk."));
     reader.readAsDataURL(blob);
   });
+}
+
+function base64ToBlob(base64, contentType) {
+  const raw = atob(base64);
+  const bytes = new Uint8Array(raw.length);
+  for (let index = 0; index < raw.length; index += 1) {
+    bytes[index] = raw.charCodeAt(index);
+  }
+  return new Blob([bytes], { type: contentType });
 }
 
 function stopRecording(_reason = "auto") {

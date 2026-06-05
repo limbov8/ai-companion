@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import io
 import logging
 import os
+import re
 import wave
 from contextlib import asynccontextmanager
 from typing import Annotated
@@ -28,6 +30,7 @@ from server.tools.web_search import WebSearchTool
 from server.voice.session import VoiceSessionManager
 
 log = logging.getLogger(__name__)
+SENTENCE_END_RE = re.compile(r"^(.+?[.!?。！？](?:\s+|$))", re.DOTALL)
 
 
 class ChatRequest(BaseModel):
@@ -136,6 +139,25 @@ def silence_wav_bytes(*, duration_seconds: float, sample_rate: int = 16_000) -> 
         wav.setframerate(sample_rate)
         wav.writeframes(b"\x00\x00" * frame_count)
     return buffer.getvalue()
+
+
+def pop_speakable_chunks(buffer: str) -> tuple[list[str], str]:
+    chunks: list[str] = []
+    pending = buffer
+    while True:
+        match = SENTENCE_END_RE.match(pending)
+        if not match:
+            break
+        chunk = match.group(1).strip()
+        if chunk:
+            chunks.append(chunk)
+        pending = pending[match.end() :]
+    if len(pending) >= 120:
+        split_at = max(pending.rfind(","), pending.rfind(";"), pending.rfind("，"), pending.rfind("；"))
+        if split_at >= 60:
+            chunks.append(pending[: split_at + 1].strip())
+            pending = pending[split_at + 1 :]
+    return chunks, pending
 
 
 app = FastAPI(title="AI Companion", lifespan=lifespan)
@@ -278,21 +300,89 @@ async def voice_socket(websocket: WebSocket, session_id: str) -> None:
                 audio_chunks = []
                 await websocket.send_json({"type": "transcript", "text": text})
             elif event_type == "text":
-                response = await services["orchestrator"].handle_text(
-                    str(payload.get("text", "")),
-                    session.messages(),
-                    source="voice",
-                )
-                session.add("user", str(payload.get("text", "")))
-                session.add("assistant", response.text)
-                await websocket.send_json(
-                    {
-                        "type": "assistant_text",
-                        "text": response.text,
-                        "memory_stored": response.memory_stored,
-                    }
-                )
+                user_text = str(payload.get("text", "")).strip()
+                await stream_voice_response(websocket, services, session, user_text)
             else:
                 await websocket.send_json({"type": "error", "message": "unknown event"})
     except WebSocketDisconnect:
         log.info("voice websocket disconnected: %s", session_id)
+
+
+async def stream_voice_response(
+    websocket: WebSocket,
+    services: dict[str, object],
+    session: object,
+    user_text: str,
+) -> None:
+    orchestrator: AgentOrchestrator = services["orchestrator"]
+    logger: ConversationLogger = services["logger"]
+    tts: QwenTtsService = services["tts"]
+    send_lock = asyncio.Lock()
+    speech_queue: asyncio.Queue[str | None] = asyncio.Queue()
+    generation = session.speaking_generation
+
+    async def send_json(payload: dict[str, object]) -> None:
+        async with send_lock:
+            await websocket.send_json(payload)
+
+    async def tts_worker() -> None:
+        while True:
+            chunk = await speech_queue.get()
+            if chunk is None:
+                return
+            if generation != session.speaking_generation:
+                return
+            try:
+                audio = await tts.synthesize(
+                    chunk,
+                    interrupt_token="cancelled" if generation != session.speaking_generation else None,
+                )
+            except TtsUnavailableError as exc:
+                await send_json({"type": "tts_error", "message": str(exc), "text": chunk})
+                continue
+            if audio and generation == session.speaking_generation:
+                await send_json(
+                    {
+                        "type": "assistant_audio",
+                        "audio": base64.b64encode(audio).decode("ascii"),
+                        "mime_type": "audio/wav",
+                        "text": chunk,
+                    }
+                )
+
+    logger.record(session.session_id, "user", user_text)
+    await send_json({"type": "assistant_start"})
+    worker = asyncio.create_task(tts_worker())
+    answer = ""
+    tts_buffer = ""
+    final_event: dict[str, object] = {}
+    try:
+        async for event in orchestrator.handle_text_stream(user_text, session.messages(), source="voice"):
+            if event.get("type") == "text_delta":
+                delta = str(event.get("text") or "")
+                answer += delta
+                tts_buffer += delta
+                await send_json({"type": "assistant_delta", "text": delta})
+                chunks, tts_buffer = pop_speakable_chunks(tts_buffer)
+                for chunk in chunks:
+                    await speech_queue.put(chunk)
+            elif event.get("type") == "done":
+                final_event = event
+        if tts_buffer.strip():
+            await speech_queue.put(tts_buffer.strip())
+        await speech_queue.put(None)
+        await worker
+        session.add("user", user_text)
+        session.add("assistant", answer)
+        logger.record(session.session_id, "assistant", answer)
+        await send_json(
+            {
+                "type": "assistant_done",
+                "text": answer,
+                "memory_stored": bool(final_event.get("memory_stored")),
+                "memories_used": final_event.get("memories_used") or [],
+            }
+        )
+    finally:
+        if not worker.done():
+            worker.cancel()

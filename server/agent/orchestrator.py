@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, AsyncIterator
 
 from server.config import ConversationConfig, MemoryConfig
 from server.llm.deepseek import ChatClient
@@ -22,6 +22,14 @@ class AgentResponse:
 
 
 @dataclass
+class AgentPreparedTurn:
+    messages: list[dict[str, str]]
+    memories: list[MemoryItem]
+    web_context: str
+    tool_result: dict[str, Any] | None
+
+
+@dataclass
 class AgentOrchestrator:
     chat: ChatClient
     embeddings: EmbeddingService
@@ -38,6 +46,43 @@ class AgentOrchestrator:
         *,
         source: str = "voice",
     ) -> AgentResponse:
+        prepared = await self.prepare_turn(user_text, history)
+        answer = await self.chat.complete(prepared.messages, purpose="conversation")
+        stored = await self.maybe_store_memory(user_text, source=source)
+        if prepared.tool_result:
+            await self.maybe_store_tool_result("web_search", prepared.tool_result)
+        return AgentResponse(
+            text=answer,
+            memories_used=prepared.memories,
+            memory_stored=stored,
+            tool_context=prepared.web_context if prepared.tool_result else "",
+        )
+
+    async def handle_text_stream(
+        self,
+        user_text: str,
+        history: list[dict[str, str]],
+        *,
+        source: str = "voice",
+    ) -> AsyncIterator[dict[str, object]]:
+        prepared = await self.prepare_turn(user_text, history)
+        answer_parts: list[str] = []
+        async for delta in self.chat.stream_complete(prepared.messages, purpose="conversation"):
+            answer_parts.append(delta)
+            yield {"type": "text_delta", "text": delta}
+        answer = "".join(answer_parts)
+        stored = await self.maybe_store_memory(user_text, source=source)
+        if prepared.tool_result:
+            await self.maybe_store_tool_result("web_search", prepared.tool_result)
+        yield {
+            "type": "done",
+            "text": answer,
+            "memory_stored": stored,
+            "memories_used": [item.text for item in prepared.memories],
+            "tool_context": prepared.web_context if prepared.tool_result else "",
+        }
+
+    async def prepare_turn(self, user_text: str, history: list[dict[str, str]]) -> AgentPreparedTurn:
         memories = await self.retrieve_memories(user_text)
         memory_context = "\n".join(f"- {item.text}" for item in memories) or "None."
         tool_result = await self.maybe_run_context_tool(user_text)
@@ -48,15 +93,11 @@ class AgentOrchestrator:
             web_context=web_context,
         )
         messages = [{"role": "system", "content": system_prompt}, *history, {"role": "user", "content": user_text}]
-        answer = await self.chat.complete(messages, purpose="conversation")
-        stored = await self.maybe_store_memory(user_text, source=source)
-        if tool_result:
-            await self.maybe_store_tool_result("web_search", tool_result)
-        return AgentResponse(
-            text=answer,
-            memories_used=memories,
-            memory_stored=stored,
-            tool_context=web_context if tool_result else "",
+        return AgentPreparedTurn(
+            messages=messages,
+            memories=memories,
+            web_context=web_context,
+            tool_result=tool_result,
         )
 
     async def maybe_run_context_tool(self, user_text: str) -> dict[str, Any] | None:

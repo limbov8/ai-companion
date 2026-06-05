@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Protocol
+from typing import AsyncIterator, Protocol
 
 import httpx
 
@@ -14,6 +14,14 @@ Message = dict[str, str]
 
 class ChatClient(Protocol):
     async def complete(self, messages: list[Message], *, purpose: str = "conversation") -> str:
+        ...
+
+    def stream_complete(
+        self,
+        messages: list[Message],
+        *,
+        purpose: str = "conversation",
+    ) -> AsyncIterator[str]:
         ...
 
     async def decide_memory(self, text: str) -> dict[str, object]:
@@ -69,6 +77,71 @@ class DeepSeekClient:
                 },
             )
             return content
+
+    async def stream_complete(
+        self,
+        messages: list[Message],
+        *,
+        purpose: str = "conversation",
+    ) -> AsyncIterator[str]:
+        if not self.config.api_key:
+            yield self._offline_response(messages, purpose)
+            return
+
+        model = (
+            self.config.conversation_model
+            if purpose == "conversation"
+            else self.config.utility_model
+        )
+        payload = {
+            "model": model,
+            "messages": messages,
+            "stream": True,
+            "reasoning_effort": self.config.reasoning_effort,
+        }
+        self._print_exchange(
+            "deepseek.input",
+            {
+                "purpose": purpose,
+                "model": model,
+                "messages": messages,
+                "stream": True,
+                "reasoning_effort": self.config.reasoning_effort,
+            },
+        )
+        collected: list[str] = []
+        async with httpx.AsyncClient(timeout=None) as client:
+            async with client.stream(
+                "POST",
+                f"{self.config.base_url}/chat/completions",
+                headers={"Authorization": f"Bearer {self.config.api_key}"},
+                json=payload,
+            ) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    raw = line.removeprefix("data:").strip()
+                    if raw == "[DONE]":
+                        break
+                    try:
+                        data = json.loads(raw)
+                    except json.JSONDecodeError:
+                        continue
+                    delta = data.get("choices", [{}])[0].get("delta", {})
+                    content = str(delta.get("content") or "")
+                    if content:
+                        collected.append(content)
+                        yield content
+        self._print_exchange(
+            "deepseek.output",
+            {
+                "purpose": purpose,
+                "model": model,
+                "stream": True,
+                "content": "".join(collected),
+            },
+        )
 
     async def decide_memory(self, text: str) -> dict[str, object]:
         messages = [
