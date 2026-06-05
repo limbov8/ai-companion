@@ -12,6 +12,8 @@ $env:AI_COMPANION_STRICT_LOCAL_MODELS = "1"
 $env:AI_COMPANION_SMOKE_TEST_LOCAL_MODELS = "1"
 $env:USE_TF = "0"
 
+. (Join-Path $PSScriptRoot "use_repo_sox.ps1")
+
 $args = @("-m", "uvicorn", "server.main:app", "--host", $HostName, "--port", "$Port")
 $logDir = "logs"
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
