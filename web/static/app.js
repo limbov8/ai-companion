@@ -18,8 +18,15 @@ let streamedTranscript = null;
 let streamedTranscriptResolve = null;
 let streamedTranscriptReject = null;
 let conversationActive = false;
+let currentPhase = "ready";
+let bargeInStream = null;
+let bargeInAudioContext = null;
+let bargeInMonitor = null;
+let bargeInTriggered = false;
 
 const silenceThreshold = 0.018;
+const bargeInThreshold = 0.035;
+const bargeInFramesNeeded = 4;
 const pauseToSubmitMs = 950;
 const noSpeechTimeoutMs = 6000;
 const maxRecordingMs = 45000;
@@ -37,6 +44,7 @@ const voiceStage = document.querySelector(".voice-stage");
 const speakerOutput = document.querySelector("#speakerOutput");
 
 function setStatus(text, phase = "ready") {
+  currentPhase = phase;
   statusEl.textContent = text;
   phaseText.textContent = text;
   voiceStage.dataset.phase = phase;
@@ -172,25 +180,30 @@ async function playTts(text) {
   playback.currentTime = 0;
   playback.playbackRate = 1.03;
   setStatus("Speaking", "speaking");
+  startBargeInMonitor().catch(() => {});
 
-  await new Promise((resolve, reject) => {
-    playback.onended = resolve;
-    playback.onerror = () => reject(new Error("The browser could not play the generated voice audio."));
-    playback.onpause = () => {
-      if (ttsAbort?.signal.aborted) resolve();
-    };
-    playback.play().catch((error) => {
-      reject(
-        new Error(
-          `Audio playback was blocked or failed: ${error.message}. Tap Mic again to unlock audio.`
-        )
-      );
+  try {
+    await new Promise((resolve, reject) => {
+      playback.onended = resolve;
+      playback.onerror = () => reject(new Error("The browser could not play the generated voice audio."));
+      playback.onpause = () => {
+        if (ttsAbort?.signal.aborted) resolve();
+      };
+      playback.play().catch((error) => {
+        reject(
+          new Error(
+            `Audio playback was blocked or failed: ${error.message}. Tap Mic again to unlock audio.`
+          )
+        );
+      });
     });
-  });
-  URL.revokeObjectURL(playback.src);
-  playback.removeAttribute("src");
-  playback.load();
-  ttsAbort = null;
+  } finally {
+    URL.revokeObjectURL(playback.src);
+    playback.removeAttribute("src");
+    playback.load();
+    stopBargeInMonitor();
+    ttsAbort = null;
+  }
 }
 
 async function speakWithBrowserVoice(text) {
@@ -199,18 +212,27 @@ async function speakWithBrowserVoice(text) {
   }
   setStatus("Speaking with browser voice", "speaking");
   window.speechSynthesis.cancel();
-  await new Promise((resolve, reject) => {
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = "en-US";
-    utterance.rate = 1.15;
-    utterance.pitch = 1.0;
-    utterance.onend = resolve;
-    utterance.onerror = (event) => reject(new Error(`Browser voice failed: ${event.error}`));
-    window.speechSynthesis.speak(utterance);
-  });
+  startBargeInMonitor().catch(() => {});
+  try {
+    await new Promise((resolve, reject) => {
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = "en-US";
+      utterance.rate = 1.15;
+      utterance.pitch = 1.0;
+      utterance.onend = resolve;
+      utterance.onerror = (event) => reject(new Error(`Browser voice failed: ${event.error}`));
+      window.speechSynthesis.speak(utterance);
+    });
+  } finally {
+    stopBargeInMonitor();
+  }
 }
 
 micButton.addEventListener("click", async () => {
+  if (busy && currentPhase === "speaking") {
+    await interruptAndListen();
+    return;
+  }
   if (busy) return;
   if (recorder && recorder.state === "recording") {
     stopRecording("manual");
@@ -252,6 +274,82 @@ async function startListening() {
   micIcon.textContent = "Listening";
   micButton.title = "Send now";
   setStatus("Listening. Pause to send.", "listening");
+}
+
+async function startBargeInMonitor() {
+  if (!conversationActive || bargeInMonitor || recorder?.state === "recording") {
+    return;
+  }
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) {
+    return;
+  }
+  bargeInTriggered = false;
+  bargeInStream = await navigator.mediaDevices.getUserMedia({
+    audio: {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+    },
+  });
+  bargeInAudioContext = new AudioContextClass();
+  const source = bargeInAudioContext.createMediaStreamSource(bargeInStream);
+  const analyser = bargeInAudioContext.createAnalyser();
+  analyser.fftSize = 1024;
+  source.connect(analyser);
+
+  const samples = new Float32Array(analyser.fftSize);
+  let hotFrames = 0;
+
+  function tick() {
+    if (!bargeInAudioContext || currentPhase !== "speaking" || !conversationActive) {
+      stopBargeInMonitor();
+      return;
+    }
+    analyser.getFloatTimeDomainData(samples);
+    const rms = Math.sqrt(samples.reduce((total, sample) => total + sample * sample, 0) / samples.length);
+    hotFrames = rms > bargeInThreshold ? hotFrames + 1 : 0;
+    if (hotFrames >= bargeInFramesNeeded && !bargeInTriggered) {
+      bargeInTriggered = true;
+      interruptAndListen().catch((error) => showError(error, "Barge-in error"));
+      return;
+    }
+    bargeInMonitor = requestAnimationFrame(tick);
+  }
+
+  bargeInMonitor = requestAnimationFrame(tick);
+}
+
+function stopBargeInMonitor() {
+  if (bargeInMonitor) {
+    cancelAnimationFrame(bargeInMonitor);
+    bargeInMonitor = null;
+  }
+  if (bargeInAudioContext) {
+    bargeInAudioContext.close();
+    bargeInAudioContext = null;
+  }
+  if (bargeInStream) {
+    bargeInStream.getTracks().forEach((track) => track.stop());
+    bargeInStream = null;
+  }
+}
+
+async function interruptAndListen() {
+  conversationActive = true;
+  stopBargeInMonitor();
+  ttsAbort?.abort();
+  window.speechSynthesis?.cancel();
+  if (playback) playback.pause();
+  if (sessionId) {
+    await fetch(`/api/barge-in/${sessionId}`, { method: "POST" }).catch(() => {});
+  }
+  setStatus("Interrupted. Listening.", "listening");
+  busy = false;
+  micButton.disabled = false;
+  if (!recorder || recorder.state !== "recording") {
+    await startListening();
+  }
 }
 
 async function startVoiceStream(contentType) {
@@ -499,6 +597,7 @@ function showError(error, prefix = "Error") {
 
 stopButton.addEventListener("click", async () => {
   conversationActive = false;
+  stopBargeInMonitor();
   ttsAbort?.abort();
   window.speechSynthesis?.cancel();
   if (playback) playback.pause();
