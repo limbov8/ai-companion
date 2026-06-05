@@ -75,8 +75,8 @@ Run the API:
 uvicorn server.main:app --host 0.0.0.0 --port 8086
 ```
 
-The local GPU models are lazy-loaded service adapters. They can be run one at a time on a single GPU instead of keeping ASR, embedding, and TTS resident at all times. Qwen TTS is configured for English and Chinese; Chinese is selected automatically when the response contains CJK text. `models.tts.model_id` can use `Echo9Zulu/Qwen3-TTS-12Hz-VoiceDesign-1.7B-INT8-OpenVINO` for the OpenVINO INT8 voice-design model, `Qwen/Qwen3-TTS-12Hz-0.6B-Base` for the PyTorch voice-clone model, or `Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice` for named speakers such as `Ryan`. Use `models.tts.speed` to make the generated voice faster or slower.
+The local GPU models are lazy-loaded service adapters. They can be run one at a time on a single GPU instead of keeping ASR, embedding, and TTS resident at all times. Qwen TTS is configured for English and Chinese; Chinese is selected automatically when the response contains CJK text. `models.tts.model_id` is set to `Qwen/Qwen3-TTS-12Hz-0.6B-Base`, the PyTorch voice-clone model supported by `qwen-tts`. You can also use `Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice` for named speakers such as `Ryan`. Use `models.tts.speed` to make the generated voice faster or slower.
 
-The `Echo9Zulu/*OpenVINO` TTS model is OpenVINO IR format, not a normal PyTorch `qwen-tts` checkpoint. Install the optional runtime with `make install-openvino-tts`. The app fails fast in strict local-model mode if the OpenVINO runtime path is selected but the local OpenVINO Qwen3-TTS runner is not available.
+The `Serveurperso/Qwen3-TTS-GGUF` files, including `qwen-talker-0.6b-base-Q4_K_M.gguf`, are GGUF weights for `qwentts.cpp`. They need a talker GGUF plus a matching `qwen-tokenizer-12hz` GGUF and are not loadable through the Python `qwen-tts` runtime used here. The app fails fast in strict local-model mode if a GGUF model ID is selected.
 
 The voice UI runs as a continuous conversation after the first Mic click. It listens, detects a pause, transcribes, answers, speaks, and returns to listening until Stop is pressed.

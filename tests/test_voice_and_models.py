@@ -75,6 +75,20 @@ def test_tts_model_id_selects_base_voice_clone_mode():
 
 
 @pytest.mark.asyncio
+async def test_gguf_tts_requires_qwentts_cpp_when_strict(monkeypatch):
+    monkeypatch.setenv("AI_COMPANION_ENABLE_LOCAL_MODELS", "1")
+    service = QwenTtsService(
+        "Serveurperso/Qwen3-TTS-GGUF/qwen-talker-0.6b-base-Q4_K_M.gguf",
+        "cuda",
+        SingleGpuGate(),
+    )
+
+    assert service._uses_gguf_backend()
+    with pytest.raises(RuntimeError, match="qwentts.cpp"):
+        await service.preload(strict=True)
+
+
+@pytest.mark.asyncio
 async def test_openvino_tts_requires_runtime_when_strict(monkeypatch):
     monkeypatch.setenv("AI_COMPANION_ENABLE_LOCAL_MODELS", "1")
     service = QwenTtsService(

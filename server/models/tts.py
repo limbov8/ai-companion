@@ -59,9 +59,23 @@ class QwenTtsService:
             return None
         os.environ.setdefault("USE_TF", "0")
         self._prepend_repo_sox_to_path()
+        if self._uses_gguf_backend():
+            return await self._load_gguf_engine(strict=strict)
         if self._uses_openvino_backend():
             return await self._load_openvino_engine(strict=strict)
         return await self._load_qwen_engine(strict=strict)
+
+    def _uses_gguf_backend(self) -> bool:
+        return "gguf" in self.model_id.lower() or self.model_id.lower().endswith(".gguf")
+
+    async def _load_gguf_engine(self, *, strict: bool = False) -> object | None:
+        if strict:
+            raise RuntimeError(
+                "The configured TTS model is GGUF format and requires qwentts.cpp with both a "
+                "talker GGUF and qwen-tokenizer-12hz GGUF. This Python service currently supports "
+                "Qwen/Qwen3-TTS-12Hz-0.6B-Base through qwen-tts."
+            )
+        return None
 
     def _uses_openvino_backend(self) -> bool:
         lowered = self.model_id.lower()
