@@ -6,7 +6,7 @@ from io import BytesIO
 import pytest
 
 from server.models.gpu import SingleGpuGate
-from server.models.tts import QwenTtsService
+from server.models.tts import QwenTtsService, TtsUnavailableError
 from server.voice.session import VoiceSessionManager
 
 
@@ -20,8 +20,19 @@ def test_barge_in_advances_generation():
 
 
 @pytest.mark.asyncio
-async def test_tts_fallback_returns_valid_wav(monkeypatch):
+async def test_tts_unavailable_raises_by_default(monkeypatch):
     monkeypatch.setenv("AI_COMPANION_ENABLE_LOCAL_MODELS", "0")
+    monkeypatch.delenv("AI_COMPANION_ALLOW_TTS_FALLBACK_WAV", raising=False)
+    service = QwenTtsService("test-tts", "cpu", SingleGpuGate())
+
+    with pytest.raises(TtsUnavailableError):
+        await service.synthesize("hello there")
+
+
+@pytest.mark.asyncio
+async def test_tts_fallback_returns_audible_wav(monkeypatch):
+    monkeypatch.setenv("AI_COMPANION_ENABLE_LOCAL_MODELS", "0")
+    monkeypatch.setenv("AI_COMPANION_ALLOW_TTS_FALLBACK_WAV", "1")
     service = QwenTtsService("test-tts", "cpu", SingleGpuGate())
 
     audio = await service.synthesize("hello there")
@@ -30,3 +41,4 @@ async def test_tts_fallback_returns_valid_wav(monkeypatch):
         assert wav.getframerate() == 12_000
         assert wav.getnchannels() == 1
         assert wav.getnframes() > 0
+        assert wav.readframes(wav.getnframes()).strip(b"\x00")

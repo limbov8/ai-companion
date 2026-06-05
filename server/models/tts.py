@@ -2,11 +2,17 @@ from __future__ import annotations
 
 import asyncio
 import io
+import math
 import os
+from pathlib import Path
 import wave
 from dataclasses import dataclass
 
 from server.models.gpu import SingleGpuGate
+
+
+class TtsUnavailableError(RuntimeError):
+    pass
 
 
 @dataclass
@@ -34,6 +40,10 @@ class QwenTtsService:
                 self._engine = await self._load_engine()
             if callable(self._engine):
                 return await asyncio.to_thread(self._engine, text)
+            if os.getenv("AI_COMPANION_ALLOW_TTS_FALLBACK_WAV", "0") != "1":
+                raise TtsUnavailableError(
+                    "Local TTS is not loaded. Start with make run or enable local models."
+                )
             return self._fallback_wav(text)
 
         return await self.gpu_gate.run(self.model_id, work)
@@ -44,6 +54,7 @@ class QwenTtsService:
                 raise RuntimeError("Local TTS loading is disabled. Set AI_COMPANION_ENABLE_LOCAL_MODELS=1.")
             return None
         os.environ.setdefault("USE_TF", "0")
+        self._prepend_repo_sox_to_path()
         try:
             import soundfile as sf
             import torch
@@ -85,14 +96,29 @@ class QwenTtsService:
         return synthesize
 
     @staticmethod
+    def _prepend_repo_sox_to_path() -> None:
+        tool_root = Path(__file__).resolve().parents[2] / ".tools" / "sox"
+        sox_exe = next(tool_root.rglob("sox.exe"), None) if tool_root.exists() else None
+        if not sox_exe:
+            return
+        sox_dir = str(sox_exe.parent)
+        path_parts = os.environ.get("PATH", "").split(os.pathsep)
+        if sox_dir not in path_parts:
+            os.environ["PATH"] = os.pathsep.join([sox_dir, *path_parts])
+
+    @staticmethod
     def _fallback_wav(text: str) -> bytes:
         duration_seconds = min(max(len(text) / 24, 0.35), 2.0)
         sample_rate = 12_000
         frame_count = int(sample_rate * duration_seconds)
+        frames = bytearray()
+        for index in range(frame_count):
+            sample = int(32767 * 0.16 * math.sin(2 * math.pi * 220 * index / sample_rate))
+            frames.extend(sample.to_bytes(2, "little", signed=True))
         buffer = io.BytesIO()
         with wave.open(buffer, "wb") as wav:
             wav.setnchannels(1)
             wav.setsampwidth(2)
             wav.setframerate(sample_rate)
-            wav.writeframes(b"\x00\x00" * frame_count)
+            wav.writeframes(bytes(frames))
         return buffer.getvalue()

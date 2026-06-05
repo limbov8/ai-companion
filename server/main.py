@@ -8,7 +8,7 @@ import wave
 from contextlib import asynccontextmanager
 from typing import Annotated
 
-from fastapi import FastAPI, File, Form, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -21,7 +21,7 @@ from server.memory.store import InMemoryVectorStore
 from server.models.asr import WhisperAsrService
 from server.models.embedding import EmbeddingService
 from server.models.gpu import SingleGpuGate
-from server.models.tts import QwenTtsService
+from server.models.tts import QwenTtsService, TtsUnavailableError
 from server.prompts.registry import PromptRegistry
 from server.tools.registry import ToolRegistry
 from server.tools.web_search import WebSearchTool
@@ -182,10 +182,13 @@ async def synthesize(request: ChatRequest) -> Response:
     tts: QwenTtsService = services["tts"]
     session = sessions.get(request.session_id)
     generation = session.speaking_generation
-    audio = await tts.synthesize(
-        request.text,
-        interrupt_token="cancelled" if generation != session.speaking_generation else None,
-    )
+    try:
+        audio = await tts.synthesize(
+            request.text,
+            interrupt_token="cancelled" if generation != session.speaking_generation else None,
+        )
+    except TtsUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return Response(audio, media_type="audio/wav")
 
 
