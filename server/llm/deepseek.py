@@ -40,6 +40,16 @@ class DeepSeekClient:
             "stream": False,
             "reasoning_effort": self.config.reasoning_effort,
         }
+        self._print_exchange(
+            "deepseek.input",
+            {
+                "purpose": purpose,
+                "model": model,
+                "messages": messages,
+                "stream": False,
+                "reasoning_effort": self.config.reasoning_effort,
+            },
+        )
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
             response = await client.post(
                 f"{self.config.base_url}/chat/completions",
@@ -48,7 +58,17 @@ class DeepSeekClient:
             )
             response.raise_for_status()
             data = response.json()
-            return data["choices"][0]["message"]["content"]
+            content = data["choices"][0]["message"]["content"]
+            self._print_exchange(
+                "deepseek.output",
+                {
+                    "purpose": purpose,
+                    "model": model,
+                    "status_code": response.status_code,
+                    "content": content,
+                },
+            )
+            return content
 
     async def decide_memory(self, text: str) -> dict[str, object]:
         messages = [
@@ -77,6 +97,10 @@ class DeepSeekClient:
             return json.dumps(self._heuristic_memory(messages[-1]["content"]))
         latest = messages[-1]["content"]
         return f"I heard you. Here is a grounded next step: {latest}"
+
+    @staticmethod
+    def _print_exchange(label: str, payload: dict[str, object]) -> None:
+        print(f"{label} {json.dumps(payload, ensure_ascii=False, indent=2)}", flush=True)
 
     @staticmethod
     def _heuristic_memory(text: str) -> dict[str, object]:
