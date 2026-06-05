@@ -25,6 +25,8 @@ let bargeInMonitor = null;
 let bargeInTriggered = false;
 let voiceStreamHandlers = {};
 let streamedPlaybackChain = Promise.resolve();
+let streamingResponseCancelled = false;
+let streamingResponseReject = null;
 
 const silenceThreshold = 0.018;
 const bargeInThreshold = 0.035;
@@ -172,6 +174,7 @@ async function sendText(text) {
 async function sendTextStreaming(text) {
   busy = true;
   micButton.disabled = true;
+  streamingResponseCancelled = false;
   addTurn("You", text);
   const companionTurn = addTurn("Companion", "", { allowEmpty: true });
   let assistantText = "";
@@ -181,20 +184,24 @@ async function sendTextStreaming(text) {
 
   try {
     await new Promise((resolve, reject) => {
+      streamingResponseReject = reject;
       voiceStreamHandlers = {
         assistant_start: () => setStatus("Thinking", "processing"),
         assistant_delta: (payload) => {
+          if (streamingResponseCancelled) return;
           assistantText += payload.text || "";
           setTurnText(companionTurn, assistantText);
           setStatus("Speaking as thoughts arrive", "speaking");
         },
         assistant_audio: (payload) => {
+          if (streamingResponseCancelled) return;
           streamedPlaybackChain = streamedPlaybackChain.then(() => playAudioChunk(payload));
         },
         tts_error: (payload) => {
           addTurn("System", `Local TTS chunk failed. ${payload.message || ""}`);
         },
         assistant_done: (payload) => {
+          if (streamingResponseCancelled) return;
           finalMeta = {
             memoryStored: Boolean(payload.memory_stored),
             memoriesUsed: Array.isArray(payload.memories_used) ? payload.memories_used : [],
@@ -210,6 +217,7 @@ async function sendTextStreaming(text) {
       voiceSocket.send(JSON.stringify({ type: "text", text }));
     });
     await streamedPlaybackChain;
+    if (streamingResponseCancelled) return;
     const badges = memoryBadges(finalMeta);
     if (badges.children.length) companionTurn.append(badges);
     addMemoryActivity(finalMeta);
@@ -219,6 +227,7 @@ async function sendTextStreaming(text) {
     showError(error);
   } finally {
     voiceStreamHandlers = {};
+    streamingResponseReject = null;
     busy = false;
     micButton.disabled = false;
     micIcon.textContent = "Mic";
@@ -276,6 +285,7 @@ async function loadConversation(id) {
   if (!id || busy) return;
   conversationActive = false;
   stopBargeInMonitor();
+  cancelStreamingResponse();
   ttsAbort?.abort();
   window.speechSynthesis?.cancel();
   if (playback) playback.pause();
@@ -299,6 +309,7 @@ async function loadConversation(id) {
 }
 
 async function playAudioChunk(payload) {
+  if (streamingResponseCancelled) return;
   const audio = payload.audio || "";
   if (!audio) return;
   const blob = base64ToBlob(audio, payload.mime_type || "audio/wav");
@@ -316,6 +327,9 @@ async function playAudioChunk(payload) {
     await new Promise((resolve, reject) => {
       playback.onended = resolve;
       playback.onerror = () => reject(new Error("The browser could not play a streamed voice chunk."));
+      playback.onpause = () => {
+        if (streamingResponseCancelled) resolve();
+      };
       playback.play().catch((error) => reject(new Error(`Audio playback failed: ${error.message}`)));
     });
   } finally {
@@ -516,6 +530,7 @@ function stopBargeInMonitor() {
 async function interruptAndListen() {
   conversationActive = true;
   stopBargeInMonitor();
+  cancelStreamingResponse();
   ttsAbort?.abort();
   window.speechSynthesis?.cancel();
   if (playback) playback.pause();
@@ -528,6 +543,14 @@ async function interruptAndListen() {
   if (!recorder || recorder.state !== "recording") {
     await startListening();
   }
+}
+
+function cancelStreamingResponse() {
+  streamingResponseCancelled = true;
+  voiceStreamHandlers = {};
+  const error = new DOMException("Interrupted", "AbortError");
+  streamingResponseReject?.(error);
+  streamingResponseReject = null;
 }
 
 async function startVoiceStream(contentType) {
@@ -788,6 +811,7 @@ function showError(error, prefix = "Error") {
 stopButton.addEventListener("click", async () => {
   conversationActive = false;
   stopBargeInMonitor();
+  cancelStreamingResponse();
   ttsAbort?.abort();
   window.speechSynthesis?.cancel();
   if (playback) playback.pause();
@@ -805,6 +829,7 @@ stopButton.addEventListener("click", async () => {
 newConversationButton.addEventListener("click", async () => {
   conversationActive = false;
   stopBargeInMonitor();
+  cancelStreamingResponse();
   ttsAbort?.abort();
   window.speechSynthesis?.cancel();
   if (playback) playback.pause();

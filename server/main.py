@@ -387,6 +387,9 @@ async def stream_voice_response(
     speech_queue: asyncio.Queue[str | None] = asyncio.Queue()
     generation = session.speaking_generation
 
+    def interrupted() -> bool:
+        return generation != session.speaking_generation
+
     async def send_json(payload: dict[str, object]) -> None:
         async with send_lock:
             await websocket.send_json(payload)
@@ -396,17 +399,17 @@ async def stream_voice_response(
             chunk = await speech_queue.get()
             if chunk is None:
                 return
-            if generation != session.speaking_generation:
+            if interrupted():
                 return
             try:
                 audio = await tts.synthesize(
                     chunk,
-                    interrupt_token="cancelled" if generation != session.speaking_generation else None,
+                    interrupt_token="cancelled" if interrupted() else None,
                 )
             except TtsUnavailableError as exc:
                 await send_json({"type": "tts_error", "message": str(exc), "text": chunk})
                 continue
-            if audio and generation == session.speaking_generation:
+            if audio and not interrupted():
                 await send_json(
                     {
                         "type": "assistant_audio",
@@ -424,6 +427,9 @@ async def stream_voice_response(
     final_event: dict[str, object] = {}
     try:
         async for event in orchestrator.handle_text_stream(user_text, session.messages(), source="voice"):
+            if interrupted():
+                await speech_queue.put(None)
+                return
             if event.get("type") == "text_delta":
                 delta = str(event.get("text") or "")
                 answer += delta
@@ -434,6 +440,9 @@ async def stream_voice_response(
                     await speech_queue.put(chunk)
             elif event.get("type") == "done":
                 final_event = event
+        if interrupted():
+            await speech_queue.put(None)
+            return
         if tts_buffer.strip():
             await speech_queue.put(tts_buffer.strip())
         await speech_queue.put(None)
