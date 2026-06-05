@@ -3,6 +3,7 @@
 This monolith is split by component folders:
 
 - `server/agent`: conversation state and orchestration.
+- `server/conversations.py`: database-backed conversation history listing and loading.
 - `server/models`: lazy local model adapters for Whisper ASR, Qwen embeddings, and Qwen TTS.
 - `server/memory`: in-memory and Postgres/pgvector memory stores.
 - `server/tools`: tool and skill registry.
@@ -27,3 +28,7 @@ The `SingleGpuGate` serializes local model work. Heavy adapters are lazy-loaded,
 ## Voice flow
 
 The UI uses browser microphone capture and sends audio chunks for ASR. The `/ws/voice/{session_id}` endpoint is ready for streaming events and barge-in messages. A full peer-connection WebRTC transport can be added around this without changing the agent orchestrator.
+
+## Conversation history
+
+Conversation turns are written to `conversation_turns` in Postgres when the configured database is available. The UI loads recent sessions from `/api/conversations`; selecting one calls `/api/conversations/{session_id}/load`, restores the visible history, and makes that session the active server-side context for continuing the conversation.

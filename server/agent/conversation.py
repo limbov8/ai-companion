@@ -23,6 +23,13 @@ class ConversationSession:
     def messages(self) -> list[dict[str, str]]:
         return [{"role": turn.role, "content": turn.content} for turn in self.turns]
 
+    def replace_messages(self, messages: list[dict[str, str]]) -> None:
+        self.turns = [
+            ConversationTurn(role=message["role"], content=message["content"])
+            for message in messages
+            if message.get("role") and message.get("content")
+        ]
+
     def barge_in(self) -> int:
         self.speaking_generation += 1
         return self.speaking_generation

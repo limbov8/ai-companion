@@ -9,6 +9,14 @@
   <body>
     <main class="shell">
       <section class="talk-surface">
+        <aside class="conversation-list-surface" aria-label="Saved conversations">
+          <div class="history-header">
+            <h2>Sessions</h2>
+            <button id="newConversationButton" class="icon-button" title="Start new conversation">New</button>
+          </div>
+          <section id="conversationList" class="conversation-list" aria-live="polite"></section>
+        </aside>
+
         <header class="topbar">
           <div>
             <h1>AI Companion</h1>

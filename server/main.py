@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from server.agent.orchestrator import AgentOrchestrator
 from server.config import load_config
+from server.conversations import PostgresConversationRepository
 from server.llm.deepseek import DeepSeekClient
 from server.logging import ConversationLogger, configure_logging
 from server.memory.store import InMemoryVectorStore
@@ -49,10 +50,12 @@ def build_services() -> dict[str, object]:
     tools = ToolRegistry()
     tools.register(WebSearchTool())
     embeddings = EmbeddingService(config.models.embedding_model_id, config.models.device, gpu_gate)
+    conversations = PostgresConversationRepository(config.database.dsn)
     return {
         "config": config,
         "sessions": VoiceSessionManager(),
-        "logger": ConversationLogger(),
+        "conversations": conversations,
+        "logger": ConversationLogger(repository=conversations),
         "asr": LocalAsrService(
             config.models.asr_model_id,
             config.models.device,
@@ -172,6 +175,69 @@ async def index() -> FileResponse:
 @app.get("/api/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/conversations")
+async def conversations() -> dict[str, object]:
+    repository: PostgresConversationRepository = app.state.services["conversations"]
+    rows = repository.list_conversations(limit=80)
+    return {
+        "conversations": [
+            {
+                "session_id": row.session_id,
+                "title": row.title,
+                "turn_count": row.turn_count,
+                "last_role": row.last_role,
+                "last_content": row.last_content,
+                "created_at": row.created_at.isoformat(),
+                "updated_at": row.updated_at.isoformat(),
+            }
+            for row in rows
+        ]
+    }
+
+
+@app.get("/api/conversations/{session_id}")
+async def conversation_detail(session_id: str) -> dict[str, object]:
+    repository: PostgresConversationRepository = app.state.services["conversations"]
+    turns = repository.load_conversation(session_id)
+    if not turns:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return {
+        "session_id": session_id,
+        "turns": [
+            {
+                "role": turn.role,
+                "content": turn.content,
+                "created_at": turn.created_at.isoformat(),
+            }
+            for turn in turns
+        ],
+    }
+
+
+@app.post("/api/conversations/{session_id}/load")
+async def load_conversation(session_id: str) -> dict[str, object]:
+    services = app.state.services
+    repository: PostgresConversationRepository = services["conversations"]
+    sessions: VoiceSessionManager = services["sessions"]
+    turns = repository.load_conversation(session_id)
+    if not turns:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    session = sessions.get(session_id)
+    messages = [{"role": turn.role, "content": turn.content} for turn in turns]
+    session.replace_messages(messages)
+    return {
+        "session_id": session.session_id,
+        "turns": [
+            {
+                "role": turn.role,
+                "content": turn.content,
+                "created_at": turn.created_at.isoformat(),
+            }
+            for turn in turns
+        ],
+    }
 
 
 @app.post("/api/chat")

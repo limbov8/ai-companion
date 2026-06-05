@@ -29,7 +29,7 @@ body {
 
 .talk-surface {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr) minmax(320px, 420px);
   grid-template-rows: auto minmax(0, 7fr) minmax(0, 3fr);
   height: 100vh;
   min-height: 0;
@@ -38,13 +38,30 @@ body {
 }
 
 .topbar {
-  grid-column: 1 / -1;
+  grid-column: 2 / -1;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
   padding: 20px 24px;
   border-bottom: 1px solid var(--line);
+}
+
+.conversation-list-surface {
+  grid-column: 1;
+  grid-row: 1 / 4;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  border-right: 1px solid var(--line);
+  overflow: hidden;
+  background: #fbfcfd;
+}
+
+.icon-button {
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 13px;
 }
 
 h1,
@@ -82,7 +99,7 @@ button:focus {
 }
 
 .voice-stage {
-  grid-column: 1;
+  grid-column: 2;
   grid-row: 2 / 4;
   display: grid;
   justify-items: center;
@@ -183,7 +200,7 @@ button:focus {
 }
 
 .history-surface {
-  grid-column: 2;
+  grid-column: 3;
   grid-row: 2;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
@@ -192,7 +209,7 @@ button:focus {
 }
 
 .memory-surface {
-  grid-column: 2;
+  grid-column: 3;
   grid-row: 3;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
@@ -221,9 +238,63 @@ button:focus {
 }
 
 .conversation,
+.conversation-list,
 .memory-activity {
   overflow: auto;
   min-height: 0;
+}
+
+.conversation-list {
+  padding: 8px 10px 18px;
+}
+
+.conversation-list-empty {
+  color: var(--muted);
+  padding: 12px 8px;
+  font-size: 13px;
+}
+
+.conversation-list-item {
+  width: 100%;
+  min-height: 0;
+  display: block;
+  text-align: left;
+  border: 0;
+  border-radius: 6px;
+  padding: 10px 8px;
+  background: transparent;
+}
+
+.conversation-list-item:hover,
+.conversation-list-item-active {
+  background: #edf3f5;
+}
+
+.conversation-list-item strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.conversation-list-item span,
+.conversation-list-item small {
+  display: block;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-list-item span {
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+.conversation-list-item small {
+  margin-top: 6px;
+  font-size: 11px;
 }
 
 .conversation {
@@ -315,16 +386,23 @@ button:focus {
 @media (max-width: 860px) {
   .talk-surface {
     grid-template-columns: 1fr;
-    grid-template-rows: auto minmax(320px, 48vh) minmax(260px, 42vh) minmax(180px, 28vh);
+    grid-template-rows: minmax(180px, 30vh) auto minmax(320px, 48vh) minmax(260px, 42vh) minmax(180px, 28vh);
     overflow: auto;
   }
 
+  .conversation-list-surface,
+  .topbar,
   .voice-stage,
   .history-surface,
   .memory-surface {
     grid-column: 1;
     grid-row: auto;
     border-left: 0;
+  }
+
+  .conversation-list-surface {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
   }
 
   .voice-button {

@@ -39,6 +39,8 @@ const conversationEl = document.querySelector("#conversation");
 const historyCountEl = document.querySelector("#historyCount");
 const memoryActivityEl = document.querySelector("#memoryActivity");
 const memoryCountEl = document.querySelector("#memoryCount");
+const conversationListEl = document.querySelector("#conversationList");
+const newConversationButton = document.querySelector("#newConversationButton");
 const micButton = document.querySelector("#micButton");
 const micIcon = document.querySelector("#micIcon");
 const stopButton = document.querySelector("#stopButton");
@@ -71,6 +73,12 @@ function addTurn(role, text, meta = {}) {
   turnCount += 1;
   historyCountEl.textContent = `${turnCount} ${turnCount === 1 ? "turn" : "turns"}`;
   return turn;
+}
+
+function resetCurrentConversation() {
+  conversationEl.innerHTML = "";
+  turnCount = 0;
+  historyCountEl.textContent = "0 turns";
 }
 
 function setTurnText(turn, text) {
@@ -143,6 +151,7 @@ async function sendText(text) {
     addMemoryActivity({ memoryStored, memoriesUsed });
     setStatus("Preparing voice", "processing");
     await playTts(data.text);
+    await loadConversationList();
     setStatus(conversationActive ? "Listening again" : "Ready", "ready");
   } catch (error) {
     showError(error);
@@ -204,6 +213,7 @@ async function sendTextStreaming(text) {
     const badges = memoryBadges(finalMeta);
     if (badges.children.length) companionTurn.append(badges);
     addMemoryActivity(finalMeta);
+    await loadConversationList();
     setStatus(conversationActive ? "Listening again" : "Ready", "ready");
   } catch (error) {
     showError(error);
@@ -220,6 +230,72 @@ async function sendTextStreaming(text) {
       }, 250);
     }
   }
+}
+
+async function loadConversationList() {
+  if (!conversationListEl) return;
+  try {
+    const response = await fetch("/api/conversations");
+    if (!response.ok) throw new Error(await response.text());
+    const data = await response.json();
+    const conversations = Array.isArray(data.conversations) ? data.conversations : [];
+    renderConversationList(conversations);
+  } catch (error) {
+    conversationListEl.innerHTML = "";
+    const empty = document.createElement("p");
+    empty.className = "conversation-list-empty";
+    empty.textContent = "Database unavailable";
+    conversationListEl.append(empty);
+  }
+}
+
+function renderConversationList(conversations) {
+  conversationListEl.innerHTML = "";
+  if (conversations.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "conversation-list-empty";
+    empty.textContent = "No saved sessions";
+    conversationListEl.append(empty);
+    return;
+  }
+  for (const item of conversations) {
+    const button = document.createElement("button");
+    button.className = "conversation-list-item";
+    if (item.session_id === sessionId) button.classList.add("conversation-list-item-active");
+    button.type = "button";
+    button.innerHTML = "<strong></strong><span></span><small></small>";
+    button.querySelector("strong").textContent = item.title || "Untitled";
+    button.querySelector("span").textContent = item.last_content || "";
+    button.querySelector("small").textContent = `${item.turn_count || 0} turns`;
+    button.addEventListener("click", () => loadConversation(item.session_id));
+    conversationListEl.append(button);
+  }
+}
+
+async function loadConversation(id) {
+  if (!id || busy) return;
+  conversationActive = false;
+  stopBargeInMonitor();
+  ttsAbort?.abort();
+  window.speechSynthesis?.cancel();
+  if (playback) playback.pause();
+  if (recorder && recorder.state === "recording") stopRecording("load");
+  stopVoiceStream();
+  stopTracks();
+  setStatus("Loading conversation", "processing");
+  const response = await fetch(`/api/conversations/${encodeURIComponent(id)}/load`, { method: "POST" });
+  if (!response.ok) {
+    showError(new Error(await response.text()));
+    return;
+  }
+  const data = await response.json();
+  sessionId = data.session_id;
+  resetCurrentConversation();
+  for (const turn of data.turns || []) {
+    addTurn(turn.role === "assistant" ? "Companion" : turn.role === "user" ? "You" : "System", turn.content);
+  }
+  await loadConversationList();
+  setStatus("Conversation loaded", "ready");
 }
 
 async function playAudioChunk(payload) {
@@ -725,3 +801,20 @@ stopButton.addEventListener("click", async () => {
   micButton.title = "Start talking";
   setStatus("Interrupted", "ready");
 });
+
+newConversationButton.addEventListener("click", async () => {
+  conversationActive = false;
+  stopBargeInMonitor();
+  ttsAbort?.abort();
+  window.speechSynthesis?.cancel();
+  if (playback) playback.pause();
+  if (recorder && recorder.state === "recording") stopRecording("new");
+  stopVoiceStream();
+  stopTracks();
+  sessionId = crypto.randomUUID();
+  resetCurrentConversation();
+  setStatus("Ready", "ready");
+  await loadConversationList();
+});
+
+loadConversationList().catch(() => {});

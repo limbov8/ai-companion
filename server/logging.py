@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from server.conversations import ConversationRepository
+
 
 def configure_logging() -> None:
     logging.basicConfig(
@@ -16,6 +18,7 @@ def configure_logging() -> None:
 @dataclass
 class ConversationLogger:
     path: Path = Path("logs/conversations.log")
+    repository: ConversationRepository | None = None
 
     def record(self, session_id: str, role: str, text: str) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -25,3 +28,5 @@ class ConversationLogger:
             self.path.read_text(encoding="utf-8") + line if self.path.exists() else line,
             encoding="utf-8",
         )
+        if self.repository:
+            self.repository.record_turn(session_id, role, text)
