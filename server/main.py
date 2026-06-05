@@ -172,6 +172,14 @@ async def transcribe(
     asr: WhisperAsrService = services["asr"]
     data = await audio.read()
     text = await asr.transcribe(data, audio.content_type or "audio/webm")
+    log.info(
+        "ASR speech-to-text result session_id=%s filename=%s content_type=%s bytes=%s text=%r",
+        session_id,
+        audio.filename,
+        audio.content_type,
+        len(data),
+        text,
+    )
     return {"session_id": session_id, "text": text}
 
 
