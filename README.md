@@ -15,13 +15,25 @@ Personal AI companion monolith for voice conversation, note taking, memory, retr
 ## Quick start
 
 1. Copy `.env.example` to `.env` and set `DEEPSEEK_API_KEY`.
-2. Start Postgres with pgvector:
+2. Run everything:
+
+```powershell
+make run
+```
+
+3. Open `http://localhost:8080`.
+
+The `make run` target creates `.env` when missing, starts Postgres with pgvector, installs Python dev dependencies, and runs the FastAPI/UI server.
+
+## Manual start
+
+Start Postgres with pgvector:
 
 ```powershell
 docker compose up -d db
 ```
 
-3. Install Python dependencies:
+Install Python dependencies:
 
 ```powershell
 python -m venv .venv
@@ -29,12 +41,10 @@ python -m venv .venv
 pip install -e ".[dev]"
 ```
 
-4. Run the API:
+Run the API:
 
 ```powershell
 uvicorn server.main:app --host 0.0.0.0 --port 8080
 ```
-
-5. Open `http://localhost:8080`.
 
 The local GPU models are lazy-loaded service adapters. They can be run one at a time on a single GPU instead of keeping ASR, embedding, and TTS resident at all times.
