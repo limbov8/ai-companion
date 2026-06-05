@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AI Companion</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="talk-surface">
+        <header class="topbar">
+          <div>
+            <h1>AI Companion</h1>
+            <p id="status">Ready</p>
+          </div>
+          <div class="controls">
+            <button id="micButton" class="icon-button" title="Start voice capture">Mic</button>
+            <button id="stopButton" class="icon-button danger" title="Barge in and stop playback">Stop</button>
+          </div>
+        </header>
+
+        <section id="conversation" class="conversation" aria-live="polite"></section>
+
+        <form id="chatForm" class="composer">
+          <input id="chatInput" name="chat" autocomplete="off" placeholder="Talk or type here" />
+          <button type="submit">Send</button>
+        </form>
+      </section>
+
+      <aside class="side-panel">
+        <nav class="tabs" aria-label="Companion panels">
+          <button class="tab active" data-tab="memory">Memory</button>
+          <button class="tab" data-tab="prompts">Prompts</button>
+          <button class="tab" data-tab="tools">Tools</button>
+        </nav>
+        <section id="memoryPanel" class="panel active">
+          <h2>Recent Memory</h2>
+          <ul id="memoryList"></ul>
+        </section>
+        <section id="promptsPanel" class="panel">
+          <h2>Prompt Registry</h2>
+          <ul id="promptList"></ul>
+        </section>
+        <section id="toolsPanel" class="panel">
+          <h2>Tools and Skills</h2>
+          <ul id="toolList"></ul>
+          <form id="searchForm" class="tool-form">
+            <input id="searchInput" placeholder="Search the web" />
+            <button type="submit">Run</button>
+          </form>
+        </section>
+      </aside>
+    </main>
+    <script src="/static/app.js" type="module"></script>
+  </body>
+</html>
