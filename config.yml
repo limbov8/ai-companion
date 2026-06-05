@@ -28,7 +28,7 @@ models:
     device: cuda
   tts:
     provider: local
-    model_id: Qwen/Qwen3-TTS-12Hz-0.6B-Base
+    model_id: mlx-community/Qwen3-TTS-12Hz-0.6B-Base-4bit
     device: cuda
     lazy_load: true
     language: English

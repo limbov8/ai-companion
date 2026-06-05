@@ -14,7 +14,7 @@ def test_config_uses_environment_secret(tmp_path, monkeypatch):
 
     assert config.deepseek.api_key == "secret-from-env"
     assert config.models.asr_model_id == "Qwen/Qwen3-ASR-1.7B"
-    assert config.models.tts_model_id == "Qwen/Qwen3-TTS-12Hz-0.6B-Base"
+    assert config.models.tts_model_id == "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-4bit"
     assert config.models.tts_languages == ("English", "Chinese")
     assert config.models.tts_speed == 1.18
     assert config.models.tts_ref_audio

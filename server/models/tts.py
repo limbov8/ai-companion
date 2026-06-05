@@ -4,9 +4,13 @@ import asyncio
 import io
 import math
 import os
+import platform
+import tempfile
 from pathlib import Path
 import wave
 from dataclasses import dataclass
+
+import httpx
 
 from server.models.gpu import SingleGpuGate
 
@@ -59,6 +63,72 @@ class QwenTtsService:
             return None
         os.environ.setdefault("USE_TF", "0")
         self._prepend_repo_sox_to_path()
+        if self._uses_mlx_backend():
+            return await self._load_mlx_engine(strict=strict)
+        return await self._load_qwen_engine(strict=strict)
+
+    def _uses_mlx_backend(self) -> bool:
+        return self.model_id.lower().startswith("mlx-community/")
+
+    async def _load_mlx_engine(self, *, strict: bool = False) -> object | None:
+        if platform.system() != "Darwin":
+            if strict:
+                raise RuntimeError(
+                    "The configured TTS model is MLX-format and needs Apple Silicon/macOS. "
+                    "Use Qwen/Qwen3-TTS-12Hz-0.6B-Base or Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice "
+                    "for this NVIDIA/CUDA setup."
+                )
+            return None
+        try:
+            import soundfile as sf
+            from mlx_audio.tts.generate import generate_audio
+            from mlx_audio.tts.utils import load_model
+        except ImportError as exc:
+            if strict:
+                raise RuntimeError(
+                    "Install MLX TTS dependencies with `python -m pip install mlx-audio`."
+                ) from exc
+            return None
+
+        model = load_model(self.model_id)
+
+        def synthesize(text: str) -> bytes:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                ref_audio = self._materialize_ref_audio(temp_dir)
+                prefix = str(Path(temp_dir) / "tts")
+                generate_audio(
+                    model=model,
+                    text=text,
+                    ref_audio=ref_audio,
+                    file_prefix=prefix,
+                )
+                output = Path(f"{prefix}.wav")
+                if not output.exists():
+                    candidates = list(Path(temp_dir).glob("tts*.wav"))
+                    if not candidates:
+                        raise RuntimeError("MLX TTS did not produce a WAV file.")
+                    output = candidates[0]
+                wav, sample_rate = sf.read(output)
+                wav = self._speed_adjust(wav)
+                buffer = io.BytesIO()
+                sf.write(buffer, wav, sample_rate, format="WAV")
+                return buffer.getvalue()
+
+        return synthesize
+
+    def _materialize_ref_audio(self, temp_dir: str) -> str | None:
+        if not self.ref_audio:
+            return None
+        if not self.ref_audio.startswith(("http://", "https://")):
+            return self.ref_audio
+        target = Path(temp_dir) / "ref_audio.wav"
+        with httpx.Client(timeout=30.0, follow_redirects=True) as client:
+            response = client.get(self.ref_audio)
+            response.raise_for_status()
+            target.write_bytes(response.content)
+        return str(target)
+
+    async def _load_qwen_engine(self, *, strict: bool = False) -> object | None:
         try:
             import soundfile as sf
             import torch

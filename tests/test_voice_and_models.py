@@ -74,6 +74,21 @@ def test_tts_model_id_selects_base_voice_clone_mode():
     assert not custom._uses_base_voice_clone()
 
 
+@pytest.mark.asyncio
+async def test_mlx_tts_requires_macos_when_strict(monkeypatch):
+    monkeypatch.setenv("AI_COMPANION_ENABLE_LOCAL_MODELS", "1")
+    monkeypatch.setattr("server.models.tts.platform.system", lambda: "Windows")
+    service = QwenTtsService(
+        "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-4bit",
+        "cuda",
+        SingleGpuGate(),
+    )
+
+    assert service._uses_mlx_backend()
+    with pytest.raises(RuntimeError, match="MLX-format"):
+        await service.preload(strict=True)
+
+
 def test_tts_fast_voice_adds_instruction_hint():
     service = QwenTtsService(
         "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",

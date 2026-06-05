@@ -3,7 +3,7 @@ HOST ?= 127.0.0.1
 PORT ?= 8086
 PG_PORT ?= 5433
 
-.PHONY: help init-env install install-audio-tools install-qwen-asr install-local-models check-docker db run run-no-db run-check run-check-no-db run-api run-api-local docker-run test gpu-status stop logs clean
+.PHONY: help init-env install install-audio-tools install-qwen-asr install-mlx-tts install-local-models check-docker db run run-no-db run-check run-check-no-db run-api run-api-local docker-run test gpu-status stop logs clean
 
 help:
 	@echo "AI Companion commands"
@@ -18,6 +18,7 @@ help:
 	@echo "  make install              Install Python dev dependencies"
 	@echo "  make install-audio-tools  Install repo-local SoX for Qwen TTS on Windows"
 	@echo "  make install-qwen-asr     Install Qwen ASR without breaking Qwen TTS"
+	@echo "  make install-mlx-tts      Install optional MLX TTS backend on Apple Silicon"
 	@echo "  make install-local-models Install GPU/local model dependencies"
 	@echo "  make test                 Run tests"
 	@echo "  make gpu-status           Show nvidia-smi GPU status"
@@ -35,6 +36,9 @@ install-audio-tools:
 
 install-qwen-asr:
 	@powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install_qwen_asr.ps1 -Python '$(PYTHON)'
+
+install-mlx-tts:
+	$(PYTHON) -m pip install -e ".[mlx-tts]"
 
 install-local-models: install-audio-tools
 	$(PYTHON) -m pip install -e ".[dev,local-models]"
