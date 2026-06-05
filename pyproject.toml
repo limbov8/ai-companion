@@ -21,6 +21,7 @@ local-models = [
   "accelerate>=0.33",
   "sentence-transformers>=3.0",
   "soundfile>=0.12",
+  "qwen-tts",
 ]
 dev = [
   "pytest>=8.2",
@@ -36,3 +37,10 @@ pythonpath = ["."]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["server*"]

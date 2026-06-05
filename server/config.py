@@ -25,6 +25,9 @@ class ModelConfig:
     tts_model_id: str
     device: str
     lazy_tts: bool
+    tts_language: str
+    tts_speaker: str
+    tts_instruct: str
 
 
 @dataclass(frozen=True)
@@ -55,6 +58,7 @@ class AppConfig:
 
 
 def load_config(path: str | Path = "config.yml") -> AppConfig:
+    load_env_file()
     raw = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
     deepseek = raw["deepseek"]
     models = raw["models"]
@@ -77,6 +81,9 @@ def load_config(path: str | Path = "config.yml") -> AppConfig:
             tts_model_id=models["tts"]["model_id"],
             device=models["asr"].get("device", "cuda"),
             lazy_tts=bool(models["tts"].get("lazy_load", True)),
+            tts_language=models["tts"].get("language", "English"),
+            tts_speaker=models["tts"].get("speaker", "Ryan"),
+            tts_instruct=models["tts"].get("instruct", ""),
         ),
         database=DatabaseConfig(dsn=os.getenv(db.get("dsn_env", "DATABASE_URL"), db["default_dsn"])),
         memory=MemoryConfig(
@@ -99,3 +106,15 @@ def deep_merge(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
         else:
             merged[key] = value
     return merged
+
+
+def load_env_file(path: str | Path = ".env") -> None:
+    env_path = Path(path)
+    if not env_path.exists():
+        return
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))

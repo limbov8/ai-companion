@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import base64
+import io
 import logging
+import os
+import wave
 from contextlib import asynccontextmanager
 from typing import Annotated
 
@@ -48,7 +51,14 @@ def build_services() -> dict[str, object]:
         "sessions": VoiceSessionManager(),
         "logger": ConversationLogger(),
         "asr": WhisperAsrService(config.models.asr_model_id, config.models.device, gpu_gate),
-        "tts": QwenTtsService(config.models.tts_model_id, config.models.device, gpu_gate),
+        "tts": QwenTtsService(
+            config.models.tts_model_id,
+            config.models.device,
+            gpu_gate,
+            language=config.models.tts_language,
+            speaker=config.models.tts_speaker,
+            instruct=config.models.tts_instruct,
+        ),
         "orchestrator": AgentOrchestrator(
             chat=DeepSeekClient(config.deepseek),
             embeddings=embeddings,
@@ -67,8 +77,56 @@ def build_services() -> dict[str, object]:
 async def lifespan(app: FastAPI):
     configure_logging()
     app.state.services = build_services()
+    if os.getenv("AI_COMPANION_PRELOAD_LOCAL_MODELS", "0") == "1":
+        strict = os.getenv("AI_COMPANION_STRICT_LOCAL_MODELS", "0") == "1"
+        await preload_local_models(app.state.services, strict=strict)
+        if os.getenv("AI_COMPANION_SMOKE_TEST_LOCAL_MODELS", "0") == "1":
+            await smoke_test_local_models(app.state.services)
     log.info("AI companion services ready")
     yield
+
+
+async def preload_local_models(services: dict[str, object], *, strict: bool) -> None:
+    log.info("Preloading local ASR, embedding, and TTS models on GPU")
+    asr: WhisperAsrService = services["asr"]
+    orchestrator: AgentOrchestrator = services["orchestrator"]
+    tts: QwenTtsService = services["tts"]
+    results = {
+        "asr": await asr.preload(strict=strict),
+        "embedding": await orchestrator.embeddings.preload(strict=strict),
+        "tts": await tts.preload(strict=strict),
+    }
+    if strict and not all(results.values()):
+        raise RuntimeError(f"Local model preload failed: {results}")
+    log.info("Local model preload results: %s", results)
+
+
+async def smoke_test_local_models(services: dict[str, object]) -> None:
+    log.info("Running local model smoke inference for ASR, embedding, and TTS")
+    asr: WhisperAsrService = services["asr"]
+    orchestrator: AgentOrchestrator = services["orchestrator"]
+    tts: QwenTtsService = services["tts"]
+
+    embedding = await orchestrator.embeddings.embed("local model smoke test")
+    transcript = await asr.transcribe(silence_wav_bytes(duration_seconds=0.35), "audio/wav")
+    audio = await tts.synthesize("Hello. Local voice model is ready.")
+    log.info(
+        "Local model smoke results: embedding_dims=%s asr_chars=%s tts_bytes=%s",
+        len(embedding),
+        len(transcript),
+        len(audio),
+    )
+
+
+def silence_wav_bytes(*, duration_seconds: float, sample_rate: int = 16_000) -> bytes:
+    frame_count = int(sample_rate * duration_seconds)
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(sample_rate)
+        wav.writeframes(b"\x00\x00" * frame_count)
+    return buffer.getvalue()
 
 
 app = FastAPI(title="AI Companion", lifespan=lifespan)

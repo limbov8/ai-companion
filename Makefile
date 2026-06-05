@@ -2,17 +2,20 @@ PYTHON ?= python
 HOST ?= 127.0.0.1
 PORT ?= 8080
 
-.PHONY: help init-env install install-local-models db run run-api docker-run test stop logs clean
+.PHONY: help init-env install install-local-models db run run-check run-api run-api-local docker-run test gpu-status stop logs clean
 
 help:
 	@echo "AI Companion commands"
-	@echo "  make run                  Create .env, start pgvector db, install deps, run API/UI"
-	@echo "  make run-api              Run API/UI only"
+	@echo "  make run                  Start db and API/UI with all three local GPU models preloaded"
+	@echo "  make run-check            Start local model server in background and show nvidia-smi"
+	@echo "  make run-api-local        Run API/UI with strict local GPU model preload"
+	@echo "  make run-api              Run API/UI without forcing local model preload"
 	@echo "  make db                   Start Postgres with pgvector"
 	@echo "  make docker-run           Run db and API with Docker Compose"
 	@echo "  make install              Install Python dev dependencies"
 	@echo "  make install-local-models Install GPU/local model dependencies"
 	@echo "  make test                 Run tests"
+	@echo "  make gpu-status           Show nvidia-smi GPU status"
 	@echo "  make stop                 Stop Docker Compose services"
 	@echo "  make logs                 Tail Docker Compose logs"
 
@@ -28,16 +31,25 @@ install-local-models:
 db:
 	docker compose up -d db
 
-run: init-env db install run-api
+run: init-env db install-local-models run-api-local
+
+run-check: init-env db install-local-models
+	@powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run_local_and_check.ps1 -Python '$(PYTHON)' -HostName '$(HOST)' -Port $(PORT)
 
 run-api:
 	$(PYTHON) -m uvicorn server.main:app --host $(HOST) --port $(PORT)
+
+run-api-local:
+	@powershell -NoProfile -ExecutionPolicy Bypass -Command "$$env:AI_COMPANION_ENABLE_LOCAL_MODELS='1'; $$env:AI_COMPANION_PRELOAD_LOCAL_MODELS='1'; $$env:AI_COMPANION_STRICT_LOCAL_MODELS='1'; $$env:AI_COMPANION_SMOKE_TEST_LOCAL_MODELS='1'; $$env:USE_TF='0'; & '$(PYTHON)' -m uvicorn server.main:app --host '$(HOST)' --port '$(PORT)'"
 
 docker-run: init-env
 	docker compose up --build
 
 test:
 	$(PYTHON) -m pytest -q
+
+gpu-status:
+	nvidia-smi
 
 stop:
 	docker compose down

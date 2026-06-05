@@ -15,7 +15,7 @@ Personal AI companion monolith for voice conversation, note taking, memory, retr
 ## Quick start
 
 1. Copy `.env.example` to `.env` and set `DEEPSEEK_API_KEY`.
-2. Run everything:
+2. Run everything, including local ASR, embedding, and TTS model preload on the GPU:
 
 ```powershell
 make run
@@ -23,7 +23,19 @@ make run
 
 3. Open `http://localhost:8080`.
 
-The `make run` target creates `.env` when missing, starts Postgres with pgvector, installs Python dev dependencies, and runs the FastAPI/UI server.
+The `make run` target creates `.env` when missing, starts Postgres with pgvector, installs local model dependencies, and runs the FastAPI/UI server with strict local GPU model preload. Startup fails if Whisper ASR, Qwen embedding, or Qwen TTS cannot load.
+
+Check GPU usage after the server starts:
+
+```powershell
+make gpu-status
+```
+
+Or start the server in the background and automatically show `nvidia-smi` after health passes:
+
+```powershell
+make run-check
+```
 
 ## Manual start
 

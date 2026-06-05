@@ -30,6 +30,9 @@ models:
     model_id: Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice
     device: cuda
     lazy_load: true
+    language: English
+    speaker: Ryan
+    instruct: Natural, warm, conversational speech.
 
 memory:
   top_k: 8

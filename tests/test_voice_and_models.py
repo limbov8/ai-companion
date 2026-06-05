@@ -20,7 +20,8 @@ def test_barge_in_advances_generation():
 
 
 @pytest.mark.asyncio
-async def test_tts_fallback_returns_valid_wav():
+async def test_tts_fallback_returns_valid_wav(monkeypatch):
+    monkeypatch.setenv("AI_COMPANION_ENABLE_LOCAL_MODELS", "0")
     service = QwenTtsService("test-tts", "cpu", SingleGpuGate())
 
     audio = await service.synthesize("hello there")

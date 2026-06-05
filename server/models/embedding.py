@@ -17,6 +17,11 @@ class EmbeddingService:
     dimensions: int = 1024
     _model: object | None = None
 
+    async def preload(self, *, strict: bool = False) -> bool:
+        if self._model is None:
+            self._model = await self._load_model(strict=strict)
+        return self._model is not None
+
     async def embed(self, text: str) -> list[float]:
         async def work() -> list[float]:
             if self._model is None:
@@ -28,16 +33,25 @@ class EmbeddingService:
 
         return await self.gpu_gate.run(self.model_id, work)
 
-    async def _load_model(self) -> object | None:
+    async def _load_model(self, *, strict: bool = False) -> object | None:
         if os.getenv("AI_COMPANION_ENABLE_LOCAL_MODELS", "0") != "1":
+            if strict:
+                raise RuntimeError(
+                    "Local embedding loading is disabled. Set AI_COMPANION_ENABLE_LOCAL_MODELS=1."
+                )
             return None
+        os.environ.setdefault("USE_TF", "0")
         try:
             from sentence_transformers import SentenceTransformer
-        except ImportError:
+        except ImportError as exc:
+            if strict:
+                raise RuntimeError("Install local model dependencies with make install-local-models.") from exc
             return None
         try:
             return SentenceTransformer(self.model_id, device=self.device)
-        except Exception:
+        except Exception as exc:
+            if strict:
+                raise RuntimeError(f"Failed to load embedding model {self.model_id}.") from exc
             return None
 
     def _hash_embedding(self, text: str) -> list[float]:
