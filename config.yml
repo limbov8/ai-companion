@@ -14,7 +14,7 @@ server:
 
 database:
   dsn_env: DATABASE_URL
-  default_dsn: postgresql+psycopg://ai_companion:ai_companion@localhost:5432/ai_companion
+  default_dsn: postgresql+psycopg://ai_companion:ai_companion@localhost:5433/ai_companion
 
 models:
   asr:

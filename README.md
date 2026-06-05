@@ -25,6 +25,18 @@ make run
 
 The `make run` target creates `.env` when missing, starts Postgres with pgvector, installs local model dependencies, and runs the FastAPI/UI server with strict local GPU model preload. Startup fails if Whisper ASR, Qwen embedding, or Qwen TTS cannot load.
 
+If Docker Desktop is not running and you only want to run the local GPU model API/UI:
+
+```powershell
+make run-no-db
+```
+
+The Docker Postgres service is exposed on host port `5433` by default to avoid collisions with a local Postgres on `5432`. If you already have a `.env`, update `DATABASE_URL` to:
+
+```powershell
+postgresql+psycopg://ai_companion:ai_companion@localhost:5433/ai_companion
+```
+
 Check GPU usage after the server starts:
 
 ```powershell
@@ -36,6 +48,8 @@ Or start the server in the background and automatically show `nvidia-smi` after 
 ```powershell
 make run-check
 ```
+
+Use `make run-check-no-db` for the same model/GPU check while Docker is down.
 
 ## Manual start
 
