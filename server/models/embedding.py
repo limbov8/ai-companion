@@ -21,7 +21,8 @@ class EmbeddingService:
             if self._model is None:
                 self._model = await self._load_model()
             if self._model is not None:
-                return await asyncio.to_thread(self._model.encode, text)
+                vector = await asyncio.to_thread(self._model.encode, text)
+                return [float(value) for value in vector]
             return self._hash_embedding(text)
 
         return await self.gpu_gate.run(self.model_id, work)
@@ -31,7 +32,10 @@ class EmbeddingService:
             from sentence_transformers import SentenceTransformer
         except ImportError:
             return None
-        return SentenceTransformer(self.model_id, device=self.device)
+        try:
+            return SentenceTransformer(self.model_id, device=self.device)
+        except Exception:
+            return None
 
     def _hash_embedding(self, text: str) -> list[float]:
         values: list[float] = []
