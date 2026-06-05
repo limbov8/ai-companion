@@ -28,7 +28,7 @@ models:
     device: cuda
   tts:
     provider: local
-    model_id: mlx-community/Qwen3-TTS-12Hz-0.6B-Base-4bit
+    model_id: Echo9Zulu/Qwen3-TTS-12Hz-VoiceDesign-1.7B-INT8-OpenVINO
     device: cuda
     lazy_load: true
     language: English

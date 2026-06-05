@@ -75,18 +75,24 @@ def test_tts_model_id_selects_base_voice_clone_mode():
 
 
 @pytest.mark.asyncio
-async def test_mlx_tts_requires_macos_when_strict(monkeypatch):
+async def test_openvino_tts_requires_runtime_when_strict(monkeypatch):
     monkeypatch.setenv("AI_COMPANION_ENABLE_LOCAL_MODELS", "1")
-    monkeypatch.setattr("server.models.tts.platform.system", lambda: "Windows")
     service = QwenTtsService(
-        "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-4bit",
+        "Echo9Zulu/Qwen3-TTS-12Hz-VoiceDesign-1.7B-INT8-OpenVINO",
         "cuda",
         SingleGpuGate(),
     )
 
-    assert service._uses_mlx_backend()
-    with pytest.raises(RuntimeError, match="MLX-format"):
+    assert service._uses_openvino_backend()
+    assert service._uses_voice_design()
+    with pytest.raises(RuntimeError, match="OpenVINO"):
         await service.preload(strict=True)
+
+
+def test_tts_model_id_selects_voice_design_mode():
+    service = QwenTtsService("Qwen/Qwen3-TTS-12Hz-VoiceDesign-1.7B", "cpu", SingleGpuGate())
+
+    assert service._uses_voice_design()
 
 
 def test_tts_fast_voice_adds_instruction_hint():

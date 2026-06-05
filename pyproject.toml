@@ -23,8 +23,9 @@ local-models = [
   "soundfile>=0.12",
   "qwen-tts",
 ]
-mlx-tts = [
-  "mlx-audio>=0.3.0",
+openvino-tts = [
+  "openvino>=2024.6",
+  "huggingface-hub>=0.34",
 ]
 dev = [
   "pytest>=8.2",
