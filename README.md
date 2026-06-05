@@ -6,7 +6,7 @@ Personal AI companion monolith for voice conversation, note taking, memory, retr
 
 - FastAPI backend with conversation orchestration.
 - Browser voice UI with microphone capture, barge-in controls, and streaming-friendly endpoints.
-- Local model service interfaces for Whisper ASR, Qwen embeddings, and Qwen TTS.
+- Local model service interfaces for Qwen or Whisper ASR, Qwen embeddings, and Qwen TTS.
 - DeepSeek chat client with multi-turn conversation support.
 - pgvector/Postgres memory schema and Docker Compose.
 - Prompt registry and prompt eval templates.
@@ -23,7 +23,9 @@ make run
 
 3. Open `http://localhost:8086`.
 
-The `make run` target creates `.env` when missing, starts Postgres with pgvector, installs local model dependencies, and runs the FastAPI/UI server with strict local GPU model preload. Startup fails if Whisper ASR, Qwen embedding, or Qwen TTS cannot load.
+The `make run` target creates `.env` when missing, starts Postgres with pgvector, installs local model dependencies, and runs the FastAPI/UI server with strict local GPU model preload. Startup fails if configured ASR, Qwen embedding, or Qwen TTS cannot load.
+
+ASR is selected by `models.asr.model_id` in `config.yml`. Use `Qwen/Qwen3-ASR-1.7B` for Qwen ASR, or set it back to `openai/whisper-large-v3` to use the Whisper pipeline. The browser streams microphone chunks to the server over WebSocket and finalizes the transcript after the detected pause. Qwen's true token-streaming ASR path requires the vLLM backend; this repo uses the transformers backend so it can share the single GPU with embedding and TTS.
 
 If Docker Desktop is not running and you only want to run the local GPU model API/UI:
 
@@ -73,4 +75,4 @@ Run the API:
 uvicorn server.main:app --host 0.0.0.0 --port 8086
 ```
 
-The local GPU models are lazy-loaded service adapters. They can be run one at a time on a single GPU instead of keeping ASR, embedding, and TTS resident at all times.
+The local GPU models are lazy-loaded service adapters. They can be run one at a time on a single GPU instead of keeping ASR, embedding, and TTS resident at all times. Qwen TTS is configured for English and Chinese; Chinese is selected automatically when the response contains CJK text.

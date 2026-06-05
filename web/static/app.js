@@ -13,6 +13,10 @@ let speechStarted = false;
 let lastVoiceAt = 0;
 let recordingHadSpeech = false;
 let recordingStopReason = "manual";
+let voiceSocket = null;
+let streamedTranscript = null;
+let streamedTranscriptResolve = null;
+let streamedTranscriptReject = null;
 
 const silenceThreshold = 0.018;
 const pauseToSubmitMs = 950;
@@ -210,8 +214,13 @@ micButton.addEventListener("click", async () => {
     activeStream = await navigator.mediaDevices.getUserMedia({ audio: true });
     recorder = new MediaRecorder(activeStream);
     const chunks = [];
+    await startVoiceStream(recorder.mimeType || "audio/webm").catch(() => {
+      streamedTranscript = null;
+      stopVoiceStream(false);
+    });
     recorder.addEventListener("dataavailable", (event) => {
       if (event.data.size > 0) chunks.push(event.data);
+      if (event.data.size > 0) sendVoiceChunk(event.data);
     });
     recorder.addEventListener("stop", async () => {
       stopSilenceMonitor();
@@ -227,6 +236,79 @@ micButton.addEventListener("click", async () => {
     showError(error, "Microphone error");
   }
 });
+
+async function startVoiceStream(contentType) {
+  stopVoiceStream();
+  if (!sessionId) {
+    sessionId = crypto.randomUUID();
+  }
+  streamedTranscript = new Promise((resolve, reject) => {
+    streamedTranscriptResolve = resolve;
+    streamedTranscriptReject = reject;
+  });
+  const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+  voiceSocket = new WebSocket(`${protocol}://${window.location.host}/ws/voice/${sessionId}`);
+  voiceSocket.addEventListener("message", (event) => {
+    const payload = JSON.parse(event.data);
+    if (payload.type === "transcript") {
+      streamedTranscriptResolve?.(payload.text || "");
+      stopVoiceStream(false);
+    } else if (payload.type === "error") {
+      streamedTranscriptReject?.(new Error(payload.message || "Voice stream error"));
+      stopVoiceStream(false);
+    }
+  });
+  voiceSocket.addEventListener("error", () => {
+    streamedTranscriptReject?.(new Error("Voice stream failed."));
+    stopVoiceStream(false);
+  });
+  await new Promise((resolve, reject) => {
+    voiceSocket.addEventListener("open", resolve, { once: true });
+    voiceSocket.addEventListener("error", () => reject(new Error("Voice stream failed.")), {
+      once: true,
+    });
+  });
+  voiceSocket.send(JSON.stringify({ type: "audio_start", content_type: contentType }));
+}
+
+function stopVoiceStream(rejectPending = true) {
+  if (rejectPending) {
+    streamedTranscriptReject?.(new Error("Voice stream stopped."));
+  }
+  streamedTranscriptResolve = null;
+  streamedTranscriptReject = null;
+  if (voiceSocket) {
+    voiceSocket.close();
+    voiceSocket = null;
+  }
+}
+
+async function sendVoiceChunk(blob) {
+  if (!voiceSocket || voiceSocket.readyState !== WebSocket.OPEN) {
+    return;
+  }
+  const audio = await blobToBase64(blob);
+  if (voiceSocket?.readyState === WebSocket.OPEN) {
+    voiceSocket.send(JSON.stringify({ type: "audio_chunk", audio }));
+  }
+}
+
+function endVoiceStream() {
+  if (!voiceSocket || voiceSocket.readyState !== WebSocket.OPEN) {
+    return false;
+  }
+  voiceSocket.send(JSON.stringify({ type: "audio_end" }));
+  return true;
+}
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",", 2)[1] || "");
+    reader.onerror = () => reject(new Error("Could not read audio chunk."));
+    reader.readAsDataURL(blob);
+  });
+}
 
 function stopRecording(_reason = "auto") {
   if (!recorder || recorder.state !== "recording") {
@@ -304,16 +386,20 @@ async function handleRecording(chunks) {
       throw new Error("I did not hear speech. Try again when you are ready.");
     }
     if (chunks.length === 0) throw new Error("No audio was captured.");
-    const blob = new Blob(chunks, { type: recorder?.mimeType || "audio/webm" });
-    const form = new FormData();
-    form.append("audio", blob, "voice.webm");
-    if (sessionId) form.append("session_id", sessionId);
-
     setStatus("Transcribing", "processing");
-    const response = await fetch("/api/asr", { method: "POST", body: form });
-    if (!response.ok) throw new Error(await response.text());
-    const data = await response.json();
-    const text = (data.text || "").trim();
+    let text = "";
+    if (endVoiceStream() && streamedTranscript) {
+      try {
+        text = String(await withTimeout(streamedTranscript, 120000, "Streaming ASR timed out.")).trim();
+      } catch {
+        text = await transcribeWithRest(chunks);
+      }
+    } else {
+      text = await transcribeWithRest(chunks);
+    }
+    if (!text) {
+      text = await transcribeWithRest(chunks);
+    }
     if (!text || text.startsWith("[asr unavailable")) {
       throw new Error(text || "I did not catch that. Try speaking a little longer.");
     }
@@ -326,7 +412,36 @@ async function handleRecording(chunks) {
     micIcon.textContent = "Mic";
     micButton.title = "Start talking";
     recorder = null;
+    stopVoiceStream(false);
   }
+}
+
+function withTimeout(promise, timeoutMs, message) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
+}
+
+async function transcribeWithRest(chunks) {
+  const blob = new Blob(chunks, { type: recorder?.mimeType || "audio/webm" });
+  const form = new FormData();
+  form.append("audio", blob, "voice.webm");
+  if (sessionId) form.append("session_id", sessionId);
+
+  const response = await fetch("/api/asr", { method: "POST", body: form });
+  if (!response.ok) throw new Error(await response.text());
+  const data = await response.json();
+  return (data.text || "").trim();
 }
 
 function stopTracks() {
@@ -361,6 +476,7 @@ stopButton.addEventListener("click", async () => {
   window.speechSynthesis?.cancel();
   if (playback) playback.pause();
   if (recorder && recorder.state === "recording") stopRecording("barge-in");
+  stopVoiceStream();
   stopTracks();
   if (sessionId) await fetch(`/api/barge-in/${sessionId}`, { method: "POST" });
   busy = false;

@@ -6,6 +6,7 @@ from io import BytesIO
 import pytest
 
 from server.models.gpu import SingleGpuGate
+from server.models.asr import LocalAsrService
 from server.models.tts import QwenTtsService, TtsUnavailableError
 from server.voice.session import VoiceSessionManager
 
@@ -17,6 +18,14 @@ def test_barge_in_advances_generation():
     assert session.speaking_generation == 0
     assert manager.barge_in("abc") == 1
     assert session.speaking_generation == 1
+
+
+def test_asr_provider_is_selected_from_model_id():
+    qwen = LocalAsrService("Qwen/Qwen3-ASR-1.7B", "cpu", SingleGpuGate())
+    whisper = LocalAsrService("openai/whisper-large-v3", "cpu", SingleGpuGate())
+
+    assert qwen._is_qwen_asr
+    assert not whisper._is_qwen_asr
 
 
 @pytest.mark.asyncio
@@ -42,3 +51,16 @@ async def test_tts_fallback_returns_audible_wav(monkeypatch):
         assert wav.getnchannels() == 1
         assert wav.getnframes() > 0
         assert wav.readframes(wav.getnframes()).strip(b"\x00")
+
+
+def test_tts_auto_selects_chinese_for_cjk_text():
+    service = QwenTtsService(
+        "test-tts",
+        "cpu",
+        SingleGpuGate(),
+        language="English",
+        languages=("English", "Chinese"),
+    )
+
+    assert service._language_for_text("hello") == "English"
+    assert service._language_for_text("你好") == "Chinese"

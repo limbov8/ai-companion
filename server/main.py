@@ -18,7 +18,7 @@ from server.config import load_config
 from server.llm.deepseek import DeepSeekClient
 from server.logging import ConversationLogger, configure_logging
 from server.memory.store import InMemoryVectorStore
-from server.models.asr import WhisperAsrService
+from server.models.asr import LocalAsrService
 from server.models.embedding import EmbeddingService
 from server.models.gpu import SingleGpuGate
 from server.models.tts import QwenTtsService, TtsUnavailableError
@@ -50,12 +50,18 @@ def build_services() -> dict[str, object]:
         "config": config,
         "sessions": VoiceSessionManager(),
         "logger": ConversationLogger(),
-        "asr": WhisperAsrService(config.models.asr_model_id, config.models.device, gpu_gate),
+        "asr": LocalAsrService(
+            config.models.asr_model_id,
+            config.models.device,
+            gpu_gate,
+            language=config.models.asr_language,
+        ),
         "tts": QwenTtsService(
             config.models.tts_model_id,
             config.models.device,
             gpu_gate,
             language=config.models.tts_language,
+            languages=config.models.tts_languages,
             speaker=config.models.tts_speaker,
             instruct=config.models.tts_instruct,
         ),
@@ -88,7 +94,7 @@ async def lifespan(app: FastAPI):
 
 async def preload_local_models(services: dict[str, object], *, strict: bool) -> None:
     log.info("Preloading local ASR, embedding, and TTS models on GPU")
-    asr: WhisperAsrService = services["asr"]
+    asr: LocalAsrService = services["asr"]
     orchestrator: AgentOrchestrator = services["orchestrator"]
     tts: QwenTtsService = services["tts"]
     results = {
@@ -103,7 +109,7 @@ async def preload_local_models(services: dict[str, object], *, strict: bool) -> 
 
 async def smoke_test_local_models(services: dict[str, object]) -> None:
     log.info("Running local model smoke inference for ASR, embedding, and TTS")
-    asr: WhisperAsrService = services["asr"]
+    asr: LocalAsrService = services["asr"]
     orchestrator: AgentOrchestrator = services["orchestrator"]
     tts: QwenTtsService = services["tts"]
 
@@ -169,7 +175,7 @@ async def transcribe(
     session_id: Annotated[str | None, Form()] = None,
 ) -> dict[str, object]:
     services = app.state.services
-    asr: WhisperAsrService = services["asr"]
+    asr: LocalAsrService = services["asr"]
     data = await audio.read()
     text = await asr.transcribe(data, audio.content_type or "audio/webm")
     log.info(
@@ -240,15 +246,33 @@ async def voice_socket(websocket: WebSocket, session_id: str) -> None:
     services = app.state.services
     sessions: VoiceSessionManager = services["sessions"]
     session = sessions.get(session_id)
+    audio_chunks: list[bytes] = []
+    audio_content_type = "audio/webm"
     try:
         while True:
             payload = await websocket.receive_json()
             event_type = payload.get("type")
             if event_type == "barge_in":
                 await websocket.send_json({"type": "barge_in", "generation": session.barge_in()})
+            elif event_type == "audio_start":
+                audio_chunks = []
+                audio_content_type = str(payload.get("content_type") or "audio/webm")
+                await websocket.send_json({"type": "audio_started"})
             elif event_type == "audio_chunk":
                 audio = base64.b64decode(str(payload.get("audio", "")))
-                text = await services["asr"].transcribe(audio)
+                audio_chunks.append(audio)
+                await websocket.send_json({"type": "audio_received", "bytes": len(audio)})
+            elif event_type == "audio_end":
+                data = b"".join(audio_chunks)
+                text = await services["asr"].transcribe(data, audio_content_type)
+                log.info(
+                    "ASR streaming speech-to-text result session_id=%s content_type=%s bytes=%s text=%r",
+                    session_id,
+                    audio_content_type,
+                    len(data),
+                    text,
+                )
+                audio_chunks = []
                 await websocket.send_json({"type": "transcript", "text": text})
             elif event_type == "text":
                 response = await services["orchestrator"].handle_text(

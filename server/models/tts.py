@@ -21,6 +21,7 @@ class QwenTtsService:
     device: str
     gpu_gate: SingleGpuGate
     language: str = "English"
+    languages: tuple[str, ...] = ()
     speaker: str = "Ryan"
     instruct: str = "Natural, warm, conversational speech."
     _engine: object | None = None
@@ -85,7 +86,7 @@ class QwenTtsService:
         def synthesize(text: str) -> bytes:
             wavs, sample_rate = model.generate_custom_voice(
                 text=text,
-                language=self.language,
+                language=self._language_for_text(text),
                 speaker=self.speaker,
                 instruct=self.instruct,
             )
@@ -94,6 +95,17 @@ class QwenTtsService:
             return buffer.getvalue()
 
         return synthesize
+
+    def _language_for_text(self, text: str) -> str:
+        languages = self.languages or (self.language,)
+        if any("\u4e00" <= char <= "\u9fff" for char in text):
+            for language in languages:
+                if language.lower() in {"chinese", "zh", "zh-cn"}:
+                    return language
+        for language in languages:
+            if language.lower() in {"english", "en", "en-us"}:
+                return language
+        return self.language
 
     @staticmethod
     def _prepend_repo_sox_to_path() -> None:

@@ -13,4 +13,5 @@ def test_config_uses_environment_secret(tmp_path, monkeypatch):
     config = load_config(config_file)
 
     assert config.deepseek.api_key == "secret-from-env"
-    assert config.models.asr_model_id == "openai/whisper-large-v3"
+    assert config.models.asr_model_id == "Qwen/Qwen3-ASR-1.7B"
+    assert config.models.tts_languages == ("English", "Chinese")

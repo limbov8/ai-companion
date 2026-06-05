@@ -21,11 +21,13 @@ class DeepSeekConfig:
 @dataclass(frozen=True)
 class ModelConfig:
     asr_model_id: str
+    asr_language: str | None
     embedding_model_id: str
     tts_model_id: str
     device: str
     lazy_tts: bool
     tts_language: str
+    tts_languages: tuple[str, ...]
     tts_speaker: str
     tts_instruct: str
 
@@ -77,11 +79,13 @@ def load_config(path: str | Path = "config.yml") -> AppConfig:
         ),
         models=ModelConfig(
             asr_model_id=models["asr"]["model_id"],
+            asr_language=models["asr"].get("language"),
             embedding_model_id=models["embedding"]["model_id"],
             tts_model_id=models["tts"]["model_id"],
             device=models["asr"].get("device", "cuda"),
             lazy_tts=bool(models["tts"].get("lazy_load", True)),
             tts_language=models["tts"].get("language", "English"),
+            tts_languages=tuple(models["tts"].get("languages", [])),
             tts_speaker=models["tts"].get("speaker", "Ryan"),
             tts_instruct=models["tts"].get("instruct", ""),
         ),

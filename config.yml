@@ -19,8 +19,9 @@ database:
 models:
   asr:
     provider: local
-    model_id: openai/whisper-large-v3
+    model_id: Qwen/Qwen3-ASR-1.7B
     device: cuda
+    language:
   embedding:
     provider: local
     model_id: Qwen/Qwen3-Embedding-0.6B
@@ -31,6 +32,9 @@ models:
     device: cuda
     lazy_load: true
     language: English
+    languages:
+      - English
+      - Chinese
     speaker: Ryan
     instruct: Natural, warm, conversational speech.
 

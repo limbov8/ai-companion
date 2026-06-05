@@ -17,7 +17,7 @@ dependencies = [
 [project.optional-dependencies]
 local-models = [
   "torch>=2.3",
-  "transformers>=4.43",
+  "transformers==4.57.3",
   "accelerate>=0.33",
   "sentence-transformers>=3.0",
   "soundfile>=0.12",
