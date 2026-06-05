@@ -30,7 +30,21 @@
           <audio id="speakerOutput" preload="auto" playsinline></audio>
         </section>
 
-        <section id="conversation" class="conversation" aria-live="polite"></section>
+        <section class="history-surface" aria-label="Conversation history">
+          <div class="history-header">
+            <h2>Conversation</h2>
+            <p id="historyCount">0 turns</p>
+          </div>
+          <section id="conversation" class="conversation" aria-live="polite"></section>
+        </section>
+
+        <aside class="memory-surface" aria-label="Memory activity">
+          <div class="history-header">
+            <h2>Memory</h2>
+            <p id="memoryCount">No memory yet</p>
+          </div>
+          <section id="memoryActivity" class="memory-activity" aria-live="polite"></section>
+        </aside>
       </section>
     </main>
     <script src="/static/app.js" type="module"></script>

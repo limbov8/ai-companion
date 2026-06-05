@@ -4,10 +4,15 @@ let playback = null;
 let activeStream = null;
 let ttsAbort = null;
 let busy = false;
+let turnCount = 0;
+let memoryEventCount = 0;
 
 const statusEl = document.querySelector("#status");
 const phaseText = document.querySelector("#phaseText");
 const conversationEl = document.querySelector("#conversation");
+const historyCountEl = document.querySelector("#historyCount");
+const memoryActivityEl = document.querySelector("#memoryActivity");
+const memoryCountEl = document.querySelector("#memoryCount");
 const micButton = document.querySelector("#micButton");
 const micIcon = document.querySelector("#micIcon");
 const stopButton = document.querySelector("#stopButton");
@@ -20,14 +25,71 @@ function setStatus(text, phase = "ready") {
   voiceStage.dataset.phase = phase;
 }
 
-function addTurn(role, text) {
+function addTurn(role, text, meta = {}) {
   if (!text) return;
   const turn = document.createElement("article");
-  turn.className = "turn";
-  turn.innerHTML = `<strong>${role}</strong><p></p>`;
+  turn.className = `turn turn-${role.toLowerCase()}`;
+  turn.innerHTML = `<div class="turn-head"><strong></strong><span></span></div><p></p>`;
+  turn.querySelector("strong").textContent = role;
+  turn.querySelector("span").textContent = new Date().toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
   turn.querySelector("p").textContent = text;
+  if (meta.memoryStored || meta.memoriesUsed?.length) {
+    turn.append(memoryBadges(meta));
+  }
   conversationEl.append(turn);
   conversationEl.scrollTop = conversationEl.scrollHeight;
+  turnCount += 1;
+  historyCountEl.textContent = `${turnCount} ${turnCount === 1 ? "turn" : "turns"}`;
+  return turn;
+}
+
+function memoryBadges(meta) {
+  const row = document.createElement("div");
+  row.className = "memory-badges";
+  if (meta.memoryStored) {
+    const stored = document.createElement("span");
+    stored.className = "memory-chip memory-chip-new";
+    stored.textContent = "Memory saved";
+    row.append(stored);
+  }
+  for (const memory of meta.memoriesUsed || []) {
+    const chip = document.createElement("span");
+    chip.className = "memory-chip";
+    chip.textContent = `Used: ${memory}`;
+    row.append(chip);
+  }
+  return row;
+}
+
+function addMemoryActivity({ memoryStored = false, memoriesUsed = [] }) {
+  if (!memoryStored && memoriesUsed.length === 0) {
+    return;
+  }
+
+  const event = document.createElement("article");
+  event.className = "memory-event";
+  const title = memoryStored ? "Saved new memory" : "Used memory";
+  event.innerHTML = `<strong></strong><ul></ul>`;
+  event.querySelector("strong").textContent = title;
+  const list = event.querySelector("ul");
+
+  if (memoryStored) {
+    const item = document.createElement("li");
+    item.textContent = "The assistant marked this exchange as durable memory.";
+    list.append(item);
+  }
+  for (const memory of memoriesUsed) {
+    const item = document.createElement("li");
+    item.textContent = memory;
+    list.append(item);
+  }
+
+  memoryActivityEl.prepend(event);
+  memoryEventCount += 1;
+  memoryCountEl.textContent = `${memoryEventCount} ${memoryEventCount === 1 ? "event" : "events"}`;
 }
 
 async function sendText(text) {
@@ -38,7 +100,10 @@ async function sendText(text) {
   try {
     const data = await postJson("/api/chat", { session_id: sessionId, text });
     sessionId = data.session_id;
-    addTurn("Companion", data.text);
+    const memoriesUsed = Array.isArray(data.memories_used) ? data.memories_used : [];
+    const memoryStored = Boolean(data.memory_stored);
+    addTurn("Companion", data.text, { memoryStored, memoriesUsed });
+    addMemoryActivity({ memoryStored, memoriesUsed });
     setStatus("Preparing voice", "processing");
     await playTts(data.text);
     setStatus("Ready", "ready");
