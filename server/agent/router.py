@@ -40,6 +40,14 @@ class AgentRouter:
 
     def decide_rules(self, ctx: AgentContext) -> AgentDecision | None:
         text = ctx.user_text.strip()
+        if ctx.active_task and ctx.active_task.status in {"active", "waiting_user"}:
+            return AgentDecision(
+                mode=AgentMode.CONTINUE_SKILL,
+                intent="continue_active_task",
+                confidence=0.9,
+                skill_name=ctx.active_task.skill_name,
+                reason="active task exists",
+            )
         if self.is_casual(text):
             return AgentDecision.answer(intent="casual_support", reason="casual conversational message")
         if self.needs_fresh_info(text) and self.has_tool(ctx, "web_search"):

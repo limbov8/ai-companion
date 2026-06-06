@@ -43,12 +43,13 @@ async def test_router_vague_planning_falls_back_to_answer_without_llm():
 
 
 @pytest.mark.asyncio
-async def test_router_followup_falls_back_to_answer_without_llm():
+async def test_router_followup_continues_active_task():
     task = ActiveTask.create("planning", {"goal": "帮我计划周末带娃出去玩"})
 
     decision = await AgentRouter().decide(ctx("Sunnyvale 附近，别太累", active_task=task))
 
-    assert decision.mode == AgentMode.ANSWER
+    assert decision.mode == AgentMode.CONTINUE_SKILL
+    assert decision.skill_name == "planning"
 
 
 @pytest.mark.asyncio
