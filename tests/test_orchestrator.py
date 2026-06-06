@@ -5,11 +5,14 @@ from dataclasses import dataclass
 import pytest
 
 from server.agent.orchestrator import AgentOrchestrator
+from server.agent.router import AgentRouter
 from server.config import ConversationConfig, MemoryConfig
 from server.memory.store import InMemoryVectorStore
 from server.models.embedding import EmbeddingService
 from server.models.gpu import SingleGpuGate
 from server.prompts.registry import PromptRegistry
+from server.skills.planning import PlanningSkill
+from server.skills.registry import SkillRegistry
 from server.tools.base import ToolSpec
 from server.tools.registry import ToolRegistry
 
@@ -23,6 +26,20 @@ class FakeChat:
 
     async def complete(self, messages, *, purpose="conversation"):
         if purpose == "utility":
+            if "control router" in messages[0]["content"]:
+                if "unknown" in messages[-1]["content"].lower():
+                    return (
+                        '{"mode":"use_tool","intent":"current_info","confidence":0.8,'
+                        '"required_slots":[],"tool_calls":[{"tool_name":"web_search",'
+                        '"args":{"query":"fresh context query","limit":6},'
+                        '"reason":"needs current context"}],"skill_name":null,'
+                        '"response_style":null,"reason":"needs current context"}'
+                    )
+                return (
+                    '{"mode":"answer","intent":"conversation","confidence":0.7,'
+                    '"required_slots":[],"tool_calls":[],"skill_name":null,'
+                    '"response_style":null,"reason":"default"}'
+                )
             return '{"remember": true, "category": "preference", "summary": "User likes quiet mornings."}'
         assert any("Relevant memory" in message["content"] for message in messages)
         self.messages.append(messages)
@@ -70,16 +87,23 @@ class FakeWebSearchTool:
         }
 
 
-@pytest.mark.asyncio
-async def test_orchestrator_stores_and_retrieves_memory():
-    embeddings = EmbeddingService("test-embedding", "cpu", SingleGpuGate(), dimensions=32)
-    store = InMemoryVectorStore()
-    orchestrator = AgentOrchestrator(
-        chat=FakeChat(),
-        embeddings=embeddings,
-        memory_store=store,
+def make_orchestrator(
+    *,
+    chat: FakeChat | None = None,
+    tools: ToolRegistry | None = None,
+    store: InMemoryVectorStore | None = None,
+) -> AgentOrchestrator:
+    chat = chat or FakeChat()
+    skills = SkillRegistry()
+    skills.register(PlanningSkill())
+    return AgentOrchestrator(
+        chat=chat,
+        embeddings=EmbeddingService("test-embedding", "cpu", SingleGpuGate(), dimensions=32),
+        memory_store=store or InMemoryVectorStore(),
         prompts=PromptRegistry(),
-        tools=ToolRegistry(),
+        tools=tools or ToolRegistry(),
+        skills=skills,
+        router=AgentRouter(chat=chat),
         memory_config=MemoryConfig(top_k=4, rerank_top_k=2, similarity_floor=-1.0),
         conversation_config=ConversationConfig(
             proactive_topic_interval_minutes=45,
@@ -87,8 +111,14 @@ async def test_orchestrator_stores_and_retrieves_memory():
         ),
     )
 
+
+@pytest.mark.asyncio
+async def test_orchestrator_stores_and_retrieves_memory():
+    store = InMemoryVectorStore()
+    orchestrator = make_orchestrator(store=store)
+
     first = await orchestrator.handle_text("I like quiet mornings.", [], source="text")
-    second = await orchestrator.handle_text("Plan my morning.", [], source="text")
+    second = await orchestrator.handle_text("What should I do tomorrow morning?", [], source="text")
 
     assert first.memory_stored is True
     assert len(store.items) == 1
@@ -98,24 +128,11 @@ async def test_orchestrator_stores_and_retrieves_memory():
 
 @pytest.mark.asyncio
 async def test_orchestrator_searches_web_for_current_questions():
-    embeddings = EmbeddingService("test-embedding", "cpu", SingleGpuGate(), dimensions=32)
-    store = InMemoryVectorStore()
     tools = ToolRegistry()
     search = FakeWebSearchTool()
     tools.register(search)
     chat = FakeChat()
-    orchestrator = AgentOrchestrator(
-        chat=chat,
-        embeddings=embeddings,
-        memory_store=store,
-        prompts=PromptRegistry(),
-        tools=tools,
-        memory_config=MemoryConfig(top_k=4, rerank_top_k=2, similarity_floor=-1.0),
-        conversation_config=ConversationConfig(
-            proactive_topic_interval_minutes=45,
-            allow_random_topics=True,
-        ),
-    )
+    orchestrator = make_orchestrator(chat=chat, tools=tools)
 
     response = await orchestrator.handle_text("What's the stock news today?", [], source="voice")
 
@@ -127,23 +144,10 @@ async def test_orchestrator_searches_web_for_current_questions():
 
 @pytest.mark.asyncio
 async def test_orchestrator_searches_web_for_chinese_stock_questions():
-    embeddings = EmbeddingService("test-embedding", "cpu", SingleGpuGate(), dimensions=32)
-    store = InMemoryVectorStore()
     tools = ToolRegistry()
     search = FakeWebSearchTool()
     tools.register(search)
-    orchestrator = AgentOrchestrator(
-        chat=FakeChat(),
-        embeddings=embeddings,
-        memory_store=store,
-        prompts=PromptRegistry(),
-        tools=tools,
-        memory_config=MemoryConfig(top_k=4, rerank_top_k=2, similarity_floor=-1.0),
-        conversation_config=ConversationConfig(
-            proactive_topic_interval_minutes=45,
-            allow_random_topics=True,
-        ),
-    )
+    orchestrator = make_orchestrator(tools=tools)
 
     response = await orchestrator.handle_text("今天股票怎么样？", [], source="voice")
 
@@ -153,23 +157,10 @@ async def test_orchestrator_searches_web_for_chinese_stock_questions():
 
 @pytest.mark.asyncio
 async def test_orchestrator_asks_llm_before_answering_unknown_questions():
-    embeddings = EmbeddingService("test-embedding", "cpu", SingleGpuGate(), dimensions=32)
-    store = InMemoryVectorStore()
     tools = ToolRegistry()
     search = FakeWebSearchTool()
     tools.register(search)
-    orchestrator = AgentOrchestrator(
-        chat=FakeChat(),
-        embeddings=embeddings,
-        memory_store=store,
-        prompts=PromptRegistry(),
-        tools=tools,
-        memory_config=MemoryConfig(top_k=4, rerank_top_k=2, similarity_floor=-1.0),
-        conversation_config=ConversationConfig(
-            proactive_topic_interval_minutes=45,
-            allow_random_topics=True,
-        ),
-    )
+    orchestrator = make_orchestrator(tools=tools)
 
     await orchestrator.handle_text("Tell me something unknown outside your knowledge.", [], source="voice")
 
@@ -178,20 +169,7 @@ async def test_orchestrator_asks_llm_before_answering_unknown_questions():
 
 @pytest.mark.asyncio
 async def test_orchestrator_streams_response_and_final_memory_metadata():
-    embeddings = EmbeddingService("test-embedding", "cpu", SingleGpuGate(), dimensions=32)
-    store = InMemoryVectorStore()
-    orchestrator = AgentOrchestrator(
-        chat=FakeChat(),
-        embeddings=embeddings,
-        memory_store=store,
-        prompts=PromptRegistry(),
-        tools=ToolRegistry(),
-        memory_config=MemoryConfig(top_k=4, rerank_top_k=2, similarity_floor=-1.0),
-        conversation_config=ConversationConfig(
-            proactive_topic_interval_minutes=45,
-            allow_random_topics=True,
-        ),
-    )
+    orchestrator = make_orchestrator()
 
     events = [
         event

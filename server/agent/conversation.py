@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
+from server.agent.task_state import ActiveTask
+
 
 @dataclass
 class ConversationTurn:
@@ -16,6 +18,7 @@ class ConversationSession:
     session_id: str
     turns: list[ConversationTurn] = field(default_factory=list)
     speaking_generation: int = 0
+    active_task: ActiveTask | None = None
 
     def add(self, role: str, content: str) -> None:
         self.turns.append(ConversationTurn(role=role, content=content))

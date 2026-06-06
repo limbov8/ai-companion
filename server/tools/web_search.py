@@ -21,6 +21,11 @@ class WebSearchTool:
             "properties": {"query": {"type": "string"}, "limit": {"type": "integer"}},
             "required": ["query"],
         },
+        when_to_use="User asks about current, recent, changing, or external information.",
+        when_not_to_use="User asks for general reasoning, emotional support, or private memory.",
+        side_effect=False,
+        requires_confirmation=False,
+        freshness="current",
     )
 
     async def run(self, **kwargs: Any) -> dict[str, Any]:

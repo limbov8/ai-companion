@@ -4,6 +4,8 @@ This monolith is split by component folders:
 
 - `server/agent`: conversation state and orchestration.
 - `server/conversations.py`: database-backed conversation history listing and loading.
+- `server/agent/decision.py` and `server/agent/router.py`: turn-level control policy.
+- `server/skills`: stateful multi-turn workflows such as planning.
 - `server/models`: lazy local model adapters for Whisper ASR, Qwen embeddings, and Qwen TTS.
 - `server/memory`: in-memory and Postgres/pgvector memory stores.
 - `server/tools`: tool and skill registry.
@@ -20,10 +22,18 @@ The `SingleGpuGate` serializes local model work. Heavy adapters are lazy-loaded,
 
 1. User text arrives from typed input or transcribed voice.
 2. The orchestrator embeds the query and retrieves memories from the vector store.
-3. Retrieved memories are reranked and inserted into the system prompt context.
-4. DeepSeek generates a multi-turn response.
-5. DeepSeek is asked whether the user text or tool result is durable memory.
-6. Durable memory is embedded and stored with metadata.
+3. The router receives user text, history, memories, active task state, tool specs, and skill specs.
+4. The router chooses answer, clarification, tool use, start skill, or continue skill.
+5. Retrieved memories and any tool results are inserted into the system prompt context.
+6. DeepSeek generates a multi-turn response, or a skill renders the next step.
+7. DeepSeek is asked whether the user text or tool result is durable memory.
+8. Durable memory is embedded and stored with metadata.
+
+## Agent control flow
+
+The companion now has a control layer around the previous chatbot flow. `AgentDecision` is the central turn decision object. Deterministic rules catch obvious current-info, memory, and planning cases; the router can fall back to a strict JSON LLM decision. Skills are separate from atomic tools: tools do one external action, while skills own multi-turn state. Active skill state lives on the in-memory conversation session for this first pass.
+
+To add a tool, implement `Tool`, fill out `ToolSpec` metadata including `when_to_use`, and register it in `build_services`. To add a skill, implement `Skill`, expose a `SkillSpec`, register it in `SkillRegistry`, and teach the router when to start it.
 
 ## Voice flow
 

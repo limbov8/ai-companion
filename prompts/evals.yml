@@ -14,3 +14,37 @@ evals:
     prompt: life_helper_system
     input: "What should I do tomorrow morning?"
     expected_behavior: Mentions morning preference only if retrieved memory contains it.
+  - name: weather_requires_tool
+    category: tool_selection
+    user: "今天 Sunnyvale 会下雨吗？"
+    expected_decision:
+      mode: use_tool
+      tool: web_search
+  - name: casual_no_tool
+    category: tool_selection
+    user: "我今天有点累"
+    expected_decision:
+      mode: answer
+  - name: missing_slots_trip
+    category: clarification
+    user: "帮我计划周末出去玩"
+    expected:
+      mode: start_skill
+      skill: planning
+      asks_one_of:
+        - 地点
+        - 预算
+        - 带不带宝宝
+        - 室内还是室外
+  - name: trip_skill_continues
+    category: multi_turn_skill
+    turns:
+      - user: "帮我计划周末带娃出门"
+        expect_mode: start_skill
+      - user: "Sunnyvale附近，别太累"
+        expect_active_skill: planning
+        expect_uses_previous_context: true
+  - name: voice_short_clarification
+    category: voice_conversation_quality
+    user: "帮我规划一下"
+    expected_behavior: Asks one short question, suitable for speech, and does not dump a long list.

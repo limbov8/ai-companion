@@ -26,6 +26,9 @@ from server.models.embedding import EmbeddingService
 from server.models.gpu import SingleGpuGate
 from server.models.tts import QwenTtsService, TtsUnavailableError
 from server.prompts.registry import PromptRegistry
+from server.agent.router import AgentRouter
+from server.skills.planning import PlanningSkill
+from server.skills.registry import SkillRegistry
 from server.tools.registry import ToolRegistry
 from server.tools.web_search import WebSearchTool
 from server.voice.session import VoiceSessionManager
@@ -49,8 +52,11 @@ def build_services() -> dict[str, object]:
     gpu_gate = SingleGpuGate()
     tools = ToolRegistry()
     tools.register(WebSearchTool())
+    skills = SkillRegistry()
+    skills.register(PlanningSkill())
     embeddings = EmbeddingService(config.models.embedding_model_id, config.models.device, gpu_gate)
     conversations = PostgresConversationRepository(config.database.dsn)
+    chat_client = DeepSeekClient(config.deepseek)
     return {
         "config": config,
         "sessions": VoiceSessionManager(),
@@ -75,15 +81,18 @@ def build_services() -> dict[str, object]:
             instruct=config.models.tts_instruct,
         ),
         "orchestrator": AgentOrchestrator(
-            chat=DeepSeekClient(config.deepseek),
+            chat=chat_client,
             embeddings=embeddings,
             memory_store=InMemoryVectorStore(),
             prompts=PromptRegistry(),
             tools=tools,
+            skills=skills,
+            router=AgentRouter(chat=chat_client),
             memory_config=config.memory,
             conversation_config=config.conversation,
         ),
         "tools": tools,
+        "skills": skills,
         "prompts": PromptRegistry(),
     }
 
@@ -248,7 +257,13 @@ async def chat(request: ChatRequest) -> dict[str, object]:
     orchestrator: AgentOrchestrator = services["orchestrator"]
     session = sessions.get(request.session_id)
     logger.record(session.session_id, "user", request.text)
-    response = await orchestrator.handle_text(request.text, session.messages(), source="text")
+    response = await orchestrator.handle_text(
+        request.text,
+        session.messages(),
+        source="text",
+        active_task=session.active_task,
+    )
+    session.active_task = response.active_task
     session.add("user", request.text)
     session.add("assistant", response.text)
     logger.record(session.session_id, "assistant", response.text)
@@ -426,7 +441,12 @@ async def stream_voice_response(
     tts_buffer = ""
     final_event: dict[str, object] = {}
     try:
-        async for event in orchestrator.handle_text_stream(user_text, session.messages(), source="voice"):
+        async for event in orchestrator.handle_text_stream(
+            user_text,
+            session.messages(),
+            source="voice",
+            active_task=session.active_task,
+        ):
             if interrupted():
                 await speech_queue.put(None)
                 return
@@ -449,6 +469,7 @@ async def stream_voice_response(
         await worker
         session.add("user", user_text)
         session.add("assistant", answer)
+        session.active_task = final_event.get("active_task")
         logger.record(session.session_id, "assistant", answer)
         await send_json(
             {
