@@ -40,22 +40,6 @@ class AgentRouter:
 
     def decide_rules(self, ctx: AgentContext) -> AgentDecision | None:
         text = ctx.user_text.strip()
-        if ctx.active_task and ctx.active_task.status in {"active", "waiting_user"}:
-            if not self.is_cancel_task(text):
-                return AgentDecision(
-                    mode=AgentMode.CONTINUE_SKILL,
-                    intent="continue_active_task",
-                    confidence=0.9,
-                    skill_name=ctx.active_task.skill_name,
-                    reason="active task exists",
-                )
-        if self.is_memory_request(text):
-            return AgentDecision(
-                mode=AgentMode.USE_TOOL,
-                intent="store_memory",
-                confidence=0.8,
-                reason="memory request handled by memory writer",
-            )
         if self.is_casual(text):
             return AgentDecision.answer(intent="casual_support", reason="casual conversational message")
         if self.needs_fresh_info(text) and self.has_tool(ctx, "web_search"):
@@ -70,14 +54,6 @@ class AgentRouter:
                         reason="fresh or external information request",
                     )
                 ],
-            )
-        if self.looks_like_planning(text) and self.has_skill(ctx, "planning"):
-            return AgentDecision(
-                mode=AgentMode.START_SKILL,
-                intent="planning",
-                confidence=0.86,
-                skill_name="planning",
-                reason="multi-turn planning request",
             )
         return None
 
@@ -125,8 +101,11 @@ class AgentRouter:
             "You are the control router for a personal AI companion. "
             "Decide the next action before the assistant answers. "
             "Prefer tools for questions about current, recent, changing, external, or unknown facts. "
-            "Prefer skills for multi-turn workflows. Ask one clarifying question only when a critical "
-            "slot is missing. Return strict JSON matching: "
+            "Prefer skills for multi-turn workflows. "
+            "If the user's request is complex or open-ended (planning, organizing, multi-step tasks), "
+            "consider start_skill to propose a structured plan before taking action. "
+            "Ask one clarifying question only when a critical slot is missing. "
+            "Return strict JSON matching: "
             "{mode,intent,confidence,required_slots,tool_calls,skill_name,response_style,reason}. "
             "mode must be one of answer, ask_clarifying, use_tool, start_skill, continue_skill. "
             f"Available tools: {json.dumps(tools, ensure_ascii=False)}. "
@@ -164,22 +143,6 @@ class AgentRouter:
     @staticmethod
     def has_skill(ctx: AgentContext, name: str) -> bool:
         return any(skill.name == name for skill in ctx.skills)
-
-    @staticmethod
-    def is_cancel_task(text: str) -> bool:
-        lowered = text.lower()
-        return any(marker in lowered for marker in ("cancel", "stop", "算了", "不用了", "取消"))
-
-    @staticmethod
-    def is_memory_request(text: str) -> bool:
-        lowered = text.lower()
-        return any(marker in lowered for marker in ("remember", "记住", "帮我记", "别忘了"))
-
-    @staticmethod
-    def looks_like_planning(text: str) -> bool:
-        lowered = text.lower()
-        markers = ("计划", "规划", "安排", "plan", "trip", "project", "周末", "出去玩", "活动")
-        return any(marker in lowered for marker in markers)
 
     @staticmethod
     def is_casual(text: str) -> bool:

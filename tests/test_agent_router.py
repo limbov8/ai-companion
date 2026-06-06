@@ -36,29 +36,26 @@ async def test_router_current_weather_uses_tool():
 
 
 @pytest.mark.asyncio
-async def test_router_vague_planning_starts_skill():
+async def test_router_vague_planning_falls_back_to_answer_without_llm():
     decision = await AgentRouter().decide(ctx("帮我计划周末带娃出去玩"))
 
-    assert decision.mode == AgentMode.START_SKILL
-    assert decision.skill_name == "planning"
+    assert decision.mode == AgentMode.ANSWER
 
 
 @pytest.mark.asyncio
-async def test_router_followup_continues_active_task():
+async def test_router_followup_falls_back_to_answer_without_llm():
     task = ActiveTask.create("planning", {"goal": "帮我计划周末带娃出去玩"})
 
     decision = await AgentRouter().decide(ctx("Sunnyvale 附近，别太累", active_task=task))
 
-    assert decision.mode == AgentMode.CONTINUE_SKILL
-    assert decision.skill_name == "planning"
+    assert decision.mode == AgentMode.ANSWER
 
 
 @pytest.mark.asyncio
-async def test_router_memory_request_uses_memory_path():
+async def test_router_memory_request_falls_back_to_answer_without_llm():
     decision = await AgentRouter().decide(ctx("帮我记住我爸喜欢喝龙井"))
 
-    assert decision.mode == AgentMode.USE_TOOL
-    assert decision.intent == "store_memory"
+    assert decision.mode == AgentMode.ANSWER
 
 
 @pytest.mark.asyncio
